@@ -6,7 +6,7 @@
     "start": "next start"
   },
   "dependencies": {
-    "@clerk/clerk-react": "1.7.0",
+    "@clerk/clerk-react": "1.22.2",
     "@clerk/clerk-sdk-node": "0.3.0",
     "next": "10.0.9",
     "react": "^17.0.2",

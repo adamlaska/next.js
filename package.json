@@ -114,7 +114,7 @@
     "async-sema": "3.0.1",
     "browserslist": "4.20.2",
     "chalk": "5.0.1",
-    "cheerio": "0.22.0",
+    "cheerio": "1.0.0",
     "cookie": "0.4.1",
     "cors": "2.8.5",
     "coveralls": "3.0.3",

@@ -1,7 +1,11 @@
-import { API, FileInfo } from 'jscodeshift'
+// It might insert extra parnes for JSX components
+// x-ref: https://github.com/facebook/jscodeshift/issues/534
 
-export default function transformer(file: FileInfo, api: API) {
-  const j = api.jscodeshift
+import type { API, FileInfo } from 'jscodeshift'
+import { createParserFromPath } from '../lib/parser'
+
+export default function transformer(file: FileInfo, _api: API) {
+  const j = createParserFromPath(file.path)
 
   const $j = j(file.source)
 
@@ -45,7 +49,7 @@ export default function transformer(file: FileInfo, api: API) {
         }
 
         // If file has <style jsx> enable legacyBehavior
-        // and keep <a> to  stay on the safe side
+        // and keep <a> to stay on the safe side
         if (hasStylesJSX) {
           $link
             .get('attributes')
@@ -86,13 +90,24 @@ export default function transformer(file: FileInfo, api: API) {
         const hasProps = props.length > 0
 
         if (hasProps) {
-          // Add props to <Link>
-          $link.get('attributes').value.push(...props)
+          // Add only unique props to <Link> (skip duplicate props)
+          const linkPropNames = $link
+            .get('attributes')
+            .value.map((linkProp) => linkProp?.name?.name)
+          const uniqueProps = []
+
+          props.forEach((anchorProp) => {
+            if (!linkPropNames.includes(anchorProp?.name?.name)) {
+              uniqueProps.push(anchorProp)
+            }
+          })
+
+          $link.get('attributes').value.push(...uniqueProps)
+
           // Remove props from <a>
           props.length = 0
         }
 
-        //
         const childrenProps = $childrenWithA.get('children')
         $childrenWithA.replaceWith(childrenProps.value)
       })

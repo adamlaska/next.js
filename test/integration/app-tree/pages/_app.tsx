@@ -1,11 +1,12 @@
 import React from 'react'
 import Link from 'next/link'
 import { createContext } from 'react'
-import { render } from 'react-dom'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
 import App, { AppContext } from 'next/app'
 import { renderToString } from 'react-dom/server'
 
-export const DummyContext = createContext(null)
+export const DummyContext = createContext(null) as React.Context<string | null>
 
 export default class MyApp extends App<{ html: string }> {
   static async getInitialProps({ Component, AppTree, ctx }: AppContext) {
@@ -20,8 +21,10 @@ export default class MyApp extends App<{ html: string }> {
 
     if (typeof window !== 'undefined') {
       const el = document.createElement('div')
-      document.querySelector('body').appendChild(el)
-      render(toRender, el)
+      document.querySelector('body')?.appendChild(el)
+      flushSync(() => {
+        createRoot(el).render(toRender)
+      })
       html = el.innerHTML
       el.remove()
     } else {
@@ -38,8 +41,8 @@ export default class MyApp extends App<{ html: string }> {
       html && router.pathname !== '/hello' ? (
         <>
           <div dangerouslySetInnerHTML={{ __html: html }} />
-          <Link href={href}>
-            <a id={href === '/' ? 'home' : 'another'}>to {href}</a>
+          <Link href={href} id={href === '/' ? 'home' : 'another'}>
+            to{href}
           </Link>
         </>
       ) : (

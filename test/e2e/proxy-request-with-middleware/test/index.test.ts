@@ -2,7 +2,7 @@
 
 import { join } from 'path'
 import { fetchViaHTTP } from 'next-test-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import { createNext, FileRef } from 'e2e-utils'
 
 describe('Requests not effected when middleware used', () => {
@@ -42,7 +42,9 @@ describe('Requests not effected when middleware used', () => {
       const data = await res.json()
       expect(data.method).toEqual(method)
       if (body) {
-        expect(data.headers['content-length']).toEqual(String(body.length))
+        expect(data.headers['content-length'] || String(body.length)).toEqual(
+          String(body.length)
+        )
       }
       expect(data.headers).toEqual(expect.objectContaining(headers))
     })

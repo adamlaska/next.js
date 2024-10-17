@@ -1,23 +1,24 @@
-import Layout from '../components/layout'
-import { useFetchUser } from '../lib/user'
+import { useUser } from "@auth0/nextjs-auth0/client";
+import Layout from "../components/layout";
 
 const Home = () => {
-  const { user, loading } = useFetchUser()
+  const { user, isLoading } = useUser();
 
   return (
-    <Layout user={user} loading={loading}>
+    <Layout user={user} loading={isLoading}>
       <h1>Next.js and Auth0 Example</h1>
 
-      {loading && <p>Loading login info...</p>}
+      {isLoading && <p>Loading login info...</p>}
 
-      {!loading && !user && (
+      {!isLoading && !user && (
         <>
           <p>
             To test the login click in <i>Login</i>
           </p>
           <p>
-            Once you have logged in you should be able to click in{' '}
-            <i>Profile</i> and <i>Logout</i>
+            Once you have logged in you should be able to navigate between
+            protected routes: client rendered, server rendered profile pages,
+            and <i>Logout</i>
           </p>
         </>
       )}
@@ -31,7 +32,8 @@ const Home = () => {
         </>
       )}
     </Layout>
-  )
-}
+  );
+};
 
-export default Home
+// fast/cached SSR page
+export default Home;

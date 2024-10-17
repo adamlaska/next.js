@@ -1,5 +1,5 @@
 import { createNext } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import webdriver from 'next-webdriver'
 
 describe('Dotenv default expansion', () => {
@@ -23,7 +23,7 @@ describe('Dotenv default expansion', () => {
   afterAll(() => next.destroy())
 
   it('should work', async () => {
-    const browser = await webdriver(next.appPort, '/')
+    const browser = await webdriver(next.url, '/')
     const text = await browser.elementByCss('p').text()
     expect(text).toBe('default')
 

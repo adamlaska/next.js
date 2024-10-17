@@ -8,6 +8,10 @@ const PUBLIC_FILE = /\.(.*)$/
 export async function middleware(request) {
   const url = request.nextUrl
 
+  if (url.pathname.includes('article')) {
+    return NextResponse.next()
+  }
+
   // this is needed for tests to get the BUILD_ID
   if (url.pathname.startsWith('/_next/static/__BUILD_ID')) {
     return NextResponse.next()
@@ -17,6 +21,17 @@ export async function middleware(request) {
     return NextResponse.next({
       'x-matched-path': '/404',
     })
+  }
+
+  if (url.pathname.includes('/middleware-external-rewrite-body')) {
+    return NextResponse.rewrite(
+      'https://next-data-api-endpoint.vercel.app/api/echo-body'
+    )
+  }
+
+  if (url.pathname.includes('/rewrite-to-static')) {
+    request.nextUrl.pathname = '/static-ssg/post-1'
+    return NextResponse.rewrite(request.nextUrl)
   }
 
   if (url.pathname.includes('/fallback-true-blog/rewritten')) {
@@ -92,6 +107,19 @@ export async function middleware(request) {
       }
     }
     return NextResponse.rewrite(url)
+  }
+
+  if (url.pathname === '/dynamic-no-cache/1') {
+    const rewriteUrl =
+      request.headers.get('purpose') === 'prefetch'
+        ? '/dynamic-no-cache/1'
+        : '/dynamic-no-cache/2'
+
+    url.pathname = rewriteUrl
+
+    return NextResponse.rewrite(url, {
+      headers: { 'x-middleware-cache': 'no-cache' },
+    })
   }
 
   if (

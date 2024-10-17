@@ -1,14 +1,14 @@
 # Rewrites Example
 
-This example shows how to use [rewrites in Next.js](https://nextjs.org/docs/api-reference/next.config.js/rewrites) to map an incoming request path to a different destination path.
+This example shows how to use [rewrites in Next.js](https://nextjs.org/docs/app/api-reference/next-config-js/rewrites) to map an incoming request path to a different destination path.
 
-The index page ([`pages/index.js`](pages/index.js)) has a list of links that match the rewrites defined in [`next.config.js`](next.config.js). Run or deploy the app to see how it works!
+The index page ([`app/page.tsx`](app/page.ts)) has a list of links that match the rewrites defined in [`next.config.js`](next.config.js). Run or deploy the app to see how it works!
 
 ## Deploy your own
 
 Deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example) or preview live with [StackBlitz](https://stackblitz.com/github/vercel/next.js/tree/canary/examples/rewrites)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/rewrites&project-name=rewrites&repository-name=rewrites)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/rewrites&project-name=rewrites&repository-name=rewrites)
 
 ## How to use
 

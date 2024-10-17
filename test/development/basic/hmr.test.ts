@@ -2,49 +2,49 @@ import { join } from 'path'
 import cheerio from 'cheerio'
 import webdriver from 'next-webdriver'
 import {
+  assertHasRedbox,
+  assertNoRedbox,
   check,
   getBrowserBodyText,
   getRedboxHeader,
+  getRedboxDescription,
   getRedboxSource,
-  hasRedbox,
   renderViaHTTP,
+  retry,
   waitFor,
 } from 'next-test-utils'
-import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { createNext } from 'e2e-utils'
+import { NextInstance } from 'e2e-utils'
+import { outdent } from 'outdent'
+import type { NextConfig } from 'next'
 
-describe('basic HMR', () => {
+describe.each([
+  { basePath: '', assetPrefix: '' },
+  { basePath: '', assetPrefix: '/asset-prefix' },
+  { basePath: '/docs', assetPrefix: '' },
+  { basePath: '/docs', assetPrefix: '/asset-prefix' },
+])('basic HMR, nextConfig: %o', (nextConfig: Partial<NextConfig>) => {
+  const { basePath } = nextConfig
   let next: NextInstance
 
   beforeAll(async () => {
     next = await createNext({
-      files: {
-        pages: new FileRef(join(__dirname, 'hmr/pages')),
-        components: new FileRef(join(__dirname, 'hmr/components')),
-      },
+      files: join(__dirname, 'hmr'),
+      nextConfig,
     })
   })
   afterAll(() => next.destroy())
 
-  it('should show hydration error correctly', async () => {
-    const browser = await webdriver(next.url, '/hydration-error')
-    await check(async () => {
-      const logs = await browser.log()
-      return logs.some((log) =>
-        log.message.includes('messages/react-hydration-error')
-      )
-        ? 'success'
-        : JSON.stringify(logs, null, 2)
-    }, 'success')
-  })
-
   it('should have correct router.isReady for auto-export page', async () => {
-    let browser = await webdriver(next.url, '/auto-export-is-ready')
+    let browser = await webdriver(next.url, basePath + '/auto-export-is-ready')
 
     expect(await browser.elementByCss('#ready').text()).toBe('yes')
     expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({})
 
-    browser = await webdriver(next.url, '/auto-export-is-ready?hello=world')
+    browser = await webdriver(
+      next.url,
+      basePath + '/auto-export-is-ready?hello=world'
+    )
 
     await check(async () => {
       return browser.elementByCss('#ready').text()
@@ -55,12 +55,12 @@ describe('basic HMR', () => {
   })
 
   it('should have correct router.isReady for getStaticProps page', async () => {
-    let browser = await webdriver(next.url, '/gsp-is-ready')
+    let browser = await webdriver(next.url, basePath + '/gsp-is-ready')
 
     expect(await browser.elementByCss('#ready').text()).toBe('yes')
     expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({})
 
-    browser = await webdriver(next.url, '/gsp-is-ready?hello=world')
+    browser = await webdriver(next.url, basePath + '/gsp-is-ready?hello=world')
 
     await check(async () => {
       return browser.elementByCss('#ready').text()
@@ -77,8 +77,7 @@ describe('basic HMR', () => {
         const newContactPagePath = join('pages', 'hmr', '_contact.js')
         let browser
         try {
-          const start = next.cliOutput.length
-          browser = await webdriver(next.appPort, '/hmr/contact')
+          browser = await webdriver(next.url, basePath + '/hmr/contact')
           const text = await browser.elementByCss('p').text()
           expect(text).toBe('This is the contact page.')
 
@@ -99,13 +98,7 @@ describe('basic HMR', () => {
             /This is the contact page/
           )
 
-          expect(next.cliOutput.slice(start)).toContain('compiling...')
-          expect(next.cliOutput.slice(start)).toContain(
-            'compiling /hmr/contact (client and server)...'
-          )
-          expect(next.cliOutput).toContain(
-            'compiling /_error (client and server)...'
-          )
+          expect(next.cliOutput).toContain('Compiled /_error')
         } finally {
           if (browser) {
             await browser.close()
@@ -121,7 +114,7 @@ describe('basic HMR', () => {
       it('should detect the changes and display it', async () => {
         let browser
         try {
-          browser = await webdriver(next.appPort, '/hmr/about')
+          browser = await webdriver(next.url, basePath + '/hmr/about')
           const text = await browser.elementByCss('p').text()
           expect(text).toBe('This is the about page.')
 
@@ -156,7 +149,7 @@ describe('basic HMR', () => {
       it('should not reload unrelated pages', async () => {
         let browser
         try {
-          browser = await webdriver(next.appPort, '/hmr/counter')
+          browser = await webdriver(next.url, basePath + '/hmr/counter')
           const text = await browser
             .elementByCss('button')
             .click()
@@ -196,7 +189,7 @@ describe('basic HMR', () => {
       it('should update styles correctly', async () => {
         let browser
         try {
-          browser = await webdriver(next.appPort, '/hmr/style')
+          browser = await webdriver(next.url, basePath + '/hmr/style')
           const pTag = await browser.elementByCss('.hmr-style-page p')
           const initialFontSize = await pTag.getComputedCss('font-size')
 
@@ -236,8 +229,8 @@ describe('basic HMR', () => {
         const originalContent = await next.readFile(pagePath)
         try {
           browser = await webdriver(
-            next.appPort,
-            '/hmr/style-stateful-component'
+            next.url,
+            basePath + '/hmr/style-stateful-component'
           )
           const pTag = await browser.elementByCss('.hmr-style-page p')
           const initialFontSize = await pTag.getComputedCss('font-size')
@@ -270,8 +263,8 @@ describe('basic HMR', () => {
         const originalContent = await next.readFile(pagePath)
         try {
           browser = await webdriver(
-            next.appPort,
-            '/hmr/style-dynamic-component'
+            next.url,
+            basePath + '/hmr/style-dynamic-component'
           )
           const div = await browser.elementByCss('#dynamic-component')
           const initialClientClassName = await div.getAttribute('class')
@@ -280,8 +273,8 @@ describe('basic HMR', () => {
           expect(initialFontSize).toBe('100px')
 
           const initialHtml = await renderViaHTTP(
-            next.appPort,
-            '/hmr/style-dynamic-component'
+            next.url,
+            basePath + '/hmr/style-dynamic-component'
           )
           expect(initialHtml.includes('100px')).toBeTruthy()
 
@@ -300,13 +293,12 @@ describe('basic HMR', () => {
           await waitFor(5000)
 
           secondBrowser = await webdriver(
-            next.appPort,
-            '/hmr/style-dynamic-component'
+            next.url,
+            basePath + '/hmr/style-dynamic-component'
           )
           // Check whether the this page has reloaded or not.
-          const editedDiv = await secondBrowser.elementByCss(
-            '#dynamic-component'
-          )
+          const editedDiv =
+            await secondBrowser.elementByCss('#dynamic-component')
           const editedClientClassName = await editedDiv.getAttribute('class')
           const editedFontSize = await editedDiv.getComputedCss('font-size')
           const browserHtml = await secondBrowser.eval(
@@ -318,8 +310,8 @@ describe('basic HMR', () => {
           expect(browserHtml.includes('font-size:100px')).toBe(false)
 
           const editedHtml = await renderViaHTTP(
-            next.appPort,
-            '/hmr/style-dynamic-component'
+            next.url,
+            basePath + '/hmr/style-dynamic-component'
           )
           expect(editedHtml.includes('200px')).toBeTruthy()
           const $editedHtml = cheerio.load(editedHtml)
@@ -341,6 +333,37 @@ describe('basic HMR', () => {
           }
         }
       })
+
+      it('should not full reload when nonlatin characters are used', async () => {
+        let browser = null
+        const pagePath = join('pages', 'hmr', 'nonlatin.js')
+        const originalContent = await next.readFile(pagePath)
+        try {
+          browser = await webdriver(next.url, basePath + '/hmr/nonlatin')
+          const timeOrigin = await browser.eval('performance.timeOrigin')
+          const editedContent = originalContent.replace(
+            '<div>テスト</div>',
+            '<div class="updated">テスト</div>'
+          )
+
+          // Change the page
+          await next.patchFile(pagePath, editedContent)
+
+          await browser.waitForElementByCss('.updated')
+
+          expect(await browser.eval('performance.timeOrigin')).toEqual(
+            timeOrigin
+          )
+        } finally {
+          // Finally is used so that we revert the content back to the original regardless of the test outcome
+          // restore the about page content.
+          await next.patchFile(pagePath, originalContent)
+
+          if (browser) {
+            await browser.close()
+          }
+        }
+      })
     })
   })
 
@@ -350,8 +373,7 @@ describe('basic HMR', () => {
       const newPage = join('pages', 'hmr', 'new-page.js')
 
       try {
-        const start = next.cliOutput.length
-        browser = await webdriver(next.appPort, '/hmr/new-page')
+        browser = await webdriver(next.url, basePath + '/hmr/new-page')
 
         expect(await browser.elementByCss('body').text()).toMatch(
           /This page could not be found/
@@ -372,12 +394,7 @@ describe('basic HMR', () => {
           /This page could not be found/
         )
 
-        expect(next.cliOutput.slice(start)).toContain(
-          'compiling /hmr/new-page (client and server)...'
-        )
-        expect(next.cliOutput).toContain(
-          'compiling /_error (client and server)...'
-        )
+        expect(next.cliOutput).toContain('Compiled /_error')
       } catch (err) {
         await next.deleteFile(newPage)
         throw err
@@ -388,38 +405,35 @@ describe('basic HMR', () => {
       }
     })
 
-    it('should detect syntax errors and recover', async () => {
+    it('should recover from 404 after a page has been added with dynamic segments', async () => {
       let browser
-      const aboutPage = join('pages', 'hmr', 'about2.js')
-      const aboutContent = await next.readFile(aboutPage)
+      const newPage = join('pages', 'hmr', '[foo]', 'page.js')
+
       try {
-        const start = next.cliOutput.length
-        browser = await webdriver(next.appPort, '/hmr/about2')
-        await check(() => getBrowserBodyText(browser), /This is the about page/)
+        browser = await webdriver(next.url, basePath + '/hmr/foo/page')
 
-        await next.patchFile(aboutPage, aboutContent.replace('</div>', 'div'))
-
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxSource(browser)).toMatch(/Unexpected eof/)
-
-        await next.patchFile(aboutPage, aboutContent)
-
-        await check(() => getBrowserBodyText(browser), /This is the about page/)
-        expect(next.cliOutput.slice(start)).toContain(
-          'compiling /hmr/about2 (client and server)...'
+        expect(await browser.elementByCss('body').text()).toMatch(
+          /This page could not be found/
         )
-        expect(next.cliOutput).toContain(
-          'compiling /_error (client and server)...'
+
+        // Add the page
+        await next.patchFile(
+          newPage,
+          'export default () => (<div id="new-page">the-new-page</div>)'
         )
+
+        await check(() => getBrowserBodyText(browser), /the-new-page/)
+
+        await next.deleteFile(newPage)
+
+        await check(
+          () => getBrowserBodyText(browser),
+          /This page could not be found/
+        )
+
+        expect(next.cliOutput).toContain('Compiled /_error')
       } catch (err) {
-        await next.patchFile(aboutPage, aboutContent)
-        if (browser) {
-          await check(
-            () => getBrowserBodyText(browser),
-            /This is the about page/
-          )
-        }
-
+        await next.deleteFile(newPage)
         throw err
       } finally {
         if (browser) {
@@ -428,52 +442,206 @@ describe('basic HMR', () => {
       }
     })
 
-    it('should show the error on all pages', async () => {
+    // this test fails frequently with turbopack
+    ;(process.env.TURBOPACK ? it.skip : it)(
+      'should not continously poll a custom error page',
+      async () => {
+        const errorPage = join('pages', '_error.js')
+
+        await next.patchFile(
+          errorPage,
+          outdent`
+          function Error({ statusCode, message, count }) {
+            return (
+              <div>
+                Error Message: {message}
+              </div>
+            )
+          }
+
+          Error.getInitialProps = async ({ res, err }) => {
+            const statusCode = res ? res.statusCode : err ? err.statusCode : 404
+            console.log('getInitialProps called');
+            return {
+              statusCode,
+              message: err ? err.message : 'Oops...',
+            }
+          }
+
+          export default Error
+        `
+        )
+
+        try {
+          // navigate to a 404 page
+          await webdriver(next.url, basePath + '/does-not-exist')
+
+          await check(() => next.cliOutput, /getInitialProps called/)
+
+          const outputIndex = next.cliOutput.length
+
+          // wait a few seconds to ensure polling didn't happen
+          await waitFor(3000)
+
+          const logOccurrences =
+            next.cliOutput.slice(outputIndex).split('getInitialProps called')
+              .length - 1
+          // eslint-disable-next-line jest/no-standalone-expect
+          expect(logOccurrences).toBe(0)
+        } finally {
+          await next.deleteFile(errorPage)
+        }
+      }
+    )
+
+    it('should detect syntax errors and recover', async () => {
+      const browser = await webdriver(next.url, basePath + '/hmr/about2')
       const aboutPage = join('pages', 'hmr', 'about2.js')
       const aboutContent = await next.readFile(aboutPage)
-      let browser
-      try {
-        await renderViaHTTP(next.appPort, '/hmr/about2')
-
-        await next.patchFile(aboutPage, aboutContent.replace('</div>', 'div'))
-
-        // Ensure dev server has time to break:
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-
-        browser = await webdriver(next.appPort, '/hmr/contact')
-
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxSource(browser)).toMatch(/Unexpected eof/)
-
-        await next.patchFile(aboutPage, aboutContent)
-
-        await check(
-          () => getBrowserBodyText(browser),
-          /This is the contact page/
+      await retry(async () => {
+        expect(await getBrowserBodyText(browser)).toMatch(
+          /This is the about page/
         )
-      } catch (err) {
-        await next.patchFile(aboutPage, aboutContent)
-        if (browser) {
+      })
+
+      await next.patchFile(aboutPage, aboutContent.replace('</div>', 'div'))
+
+      await assertHasRedbox(browser)
+      const source = next.normalizeTestDirContent(
+        await getRedboxSource(browser)
+      )
+      if (basePath === '' && !process.env.TURBOPACK) {
+        expect(source).toMatchInlineSnapshot(`
+          "./pages/hmr/about2.js
+          Error:   x Unexpected token. Did you mean \`{'}'}\` or \`&rbrace;\`?
+             ,-[7:1]
+           4 |       <p>This is the about page.</p>
+           5 |     div
+           6 |   )
+           7 | }
+             : ^
+             \`----
+            x Unexpected eof
+             ,-[7:3]
+           5 |     div
+           6 |   )
+           7 | }
+             \`----
+
+          Caused by:
+              Syntax Error
+
+          Import trace for requested module:
+          ./pages/hmr/about2.js"
+        `)
+      } else if (basePath === '' && process.env.TURBOPACK) {
+        expect(source).toMatchInlineSnapshot(`
+            "./pages/hmr/about2.js:7:1
+            Parsing ecmascript source code failed
+              5 |     div
+              6 |   )
+            > 7 | }
+                | ^
+              8 |
+
+            Unexpected token. Did you mean \`{'}'}\` or \`&rbrace;\`?"
+          `)
+      } else if (basePath === '/docs' && !process.env.TURBOPACK) {
+        expect(source).toMatchInlineSnapshot(`
+          "./pages/hmr/about2.js
+          Error:   x Unexpected token. Did you mean \`{'}'}\` or \`&rbrace;\`?
+             ,-[7:1]
+           4 |       <p>This is the about page.</p>
+           5 |     div
+           6 |   )
+           7 | }
+             : ^
+             \`----
+            x Unexpected eof
+             ,-[7:3]
+           5 |     div
+           6 |   )
+           7 | }
+             \`----
+
+          Caused by:
+              Syntax Error
+
+          Import trace for requested module:
+          ./pages/hmr/about2.js"
+        `)
+      } else if (basePath === '/docs' && process.env.TURBOPACK) {
+        expect(source).toMatchInlineSnapshot(`
+            "./pages/hmr/about2.js:7:1
+            Parsing ecmascript source code failed
+              5 |     div
+              6 |   )
+            > 7 | }
+                | ^
+              8 |
+
+            Unexpected token. Did you mean \`{'}'}\` or \`&rbrace;\`?"
+          `)
+      }
+
+      await next.patchFile(aboutPage, aboutContent)
+
+      await retry(async () => {
+        expect(await getBrowserBodyText(browser)).toMatch(
+          /This is the about page/
+        )
+      })
+    })
+
+    if (!process.env.TURBOPACK) {
+      // Turbopack doesn't have this restriction
+      it('should show the error on all pages', async () => {
+        const aboutPage = join('pages', 'hmr', 'about2.js')
+        const aboutContent = await next.readFile(aboutPage)
+        let browser
+        try {
+          await renderViaHTTP(next.url, basePath + '/hmr/about2')
+
+          await next.patchFile(aboutPage, aboutContent.replace('</div>', 'div'))
+
+          // Ensure dev server has time to break:
+          await new Promise((resolve) => setTimeout(resolve, 2000))
+
+          browser = await webdriver(next.url, basePath + '/hmr/contact')
+
+          await assertHasRedbox(browser)
+          expect(await getRedboxSource(browser)).toMatch(/Unexpected eof/)
+
+          await next.patchFile(aboutPage, aboutContent)
+
           await check(
             () => getBrowserBodyText(browser),
             /This is the contact page/
           )
-        }
+        } catch (err) {
+          await next.patchFile(aboutPage, aboutContent)
+          if (browser) {
+            await check(
+              () => getBrowserBodyText(browser),
+              /This is the contact page/
+            )
+          }
 
-        throw err
-      } finally {
-        if (browser) {
-          await browser.close()
+          throw err
+        } finally {
+          if (browser) {
+            await browser.close()
+          }
         }
-      }
-    })
+      })
+    }
 
     it('should detect runtime errors on the module scope', async () => {
       let browser
       const aboutPage = join('pages', 'hmr', 'about3.js')
       const aboutContent = await next.readFile(aboutPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/about3')
+        browser = await webdriver(next.url, basePath + '/hmr/about3')
         await check(() => getBrowserBodyText(browser), /This is the about page/)
 
         await next.patchFile(
@@ -481,7 +649,7 @@ describe('basic HMR', () => {
           aboutContent.replace('export', 'aa=20;\nexport')
         )
 
-        expect(await hasRedbox(browser)).toBe(true)
+        await assertHasRedbox(browser)
         expect(await getRedboxHeader(browser)).toMatch(/aa is not defined/)
 
         await next.patchFile(aboutPage, aboutContent)
@@ -500,7 +668,7 @@ describe('basic HMR', () => {
       const aboutPage = join('pages', 'hmr', 'about4.js')
       const aboutContent = await next.readFile(aboutPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/about4')
+        browser = await webdriver(next.url, basePath + '/hmr/about4')
         await check(() => getBrowserBodyText(browser), /This is the about page/)
 
         await next.patchFile(
@@ -511,7 +679,7 @@ describe('basic HMR', () => {
           )
         )
 
-        expect(await hasRedbox(browser)).toBe(true)
+        await assertHasRedbox(browser)
         expect(await getRedboxSource(browser)).toMatch(/an-expected-error/)
 
         await next.patchFile(aboutPage, aboutContent)
@@ -539,7 +707,7 @@ describe('basic HMR', () => {
       const aboutPage = join('pages', 'hmr', 'about5.js')
       const aboutContent = await next.readFile(aboutPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/about5')
+        browser = await webdriver(next.url, basePath + '/hmr/about5')
         await check(() => getBrowserBodyText(browser), /This is the about page/)
 
         await next.patchFile(
@@ -550,15 +718,10 @@ describe('basic HMR', () => {
           )
         )
 
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxHeader(browser)).toMatchInlineSnapshot(`
-          " 1 of 1 unhandled error
-          Server Error
-
-          Error: The default export is not a React Component in page: \\"/hmr/about5\\"
-
-          This error happened while generating the page. Any console logs will be displayed in the terminal window."
-        `)
+        await assertHasRedbox(browser)
+        expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
+          `"Error: The default export is not a React Component in page: "/hmr/about5""`
+        )
 
         await next.patchFile(aboutPage, aboutContent)
 
@@ -586,7 +749,7 @@ describe('basic HMR', () => {
       const aboutPage = join('pages', 'hmr', 'about6.js')
       const aboutContent = await next.readFile(aboutPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/about6')
+        browser = await webdriver(next.url, basePath + '/hmr/about6')
         await check(() => getBrowserBodyText(browser), /This is the about page/)
 
         await next.patchFile(
@@ -597,19 +760,10 @@ describe('basic HMR', () => {
           )
         )
 
-        const isReact17 = process.env.NEXT_TEST_REACT_VERSION === '^17'
-
-        expect(await hasRedbox(browser)).toBe(true)
+        await assertHasRedbox(browser)
         // TODO: Replace this when webpack 5 is the default
-        expect(
-          (await getRedboxHeader(browser)).replace(
-            '__WEBPACK_DEFAULT_EXPORT__',
-            'Unknown'
-          )
-        ).toMatch(
-          `Objects are not valid as a React child (found: ${
-            isReact17 ? '/search/' : '[object RegExp]'
-          }). If you meant to render a collection of children, use an array instead.`
+        expect(await getRedboxHeader(browser)).toMatch(
+          `Objects are not valid as a React child (found: [object RegExp]). If you meant to render a collection of children, use an array instead.`
         )
 
         await next.patchFile(aboutPage, aboutContent)
@@ -639,7 +793,7 @@ describe('basic HMR', () => {
 
       const aboutContent = await next.readFile(aboutPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/about7')
+        browser = await webdriver(next.url, basePath + '/hmr/about7')
         await check(() => getBrowserBodyText(browser), /This is the about page/)
 
         await next.patchFile(
@@ -650,20 +804,15 @@ describe('basic HMR', () => {
           )
         )
 
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxHeader(browser)).toMatchInlineSnapshot(`
-          " 1 of 1 unhandled error
-          Server Error
-
-          Error: The default export is not a React Component in page: \\"/hmr/about7\\"
-
-          This error happened while generating the page. Any console logs will be displayed in the terminal window."
-        `)
+        await assertHasRedbox(browser)
+        expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
+          `"Error: The default export is not a React Component in page: "/hmr/about7""`
+        )
 
         await next.patchFile(aboutPage, aboutContent)
 
         await check(() => getBrowserBodyText(browser), /This is the about page/)
-        expect(await hasRedbox(browser, false)).toBe(false)
+        await assertNoRedbox(browser)
       } catch (err) {
         await next.patchFile(aboutPage, aboutContent)
 
@@ -682,21 +831,161 @@ describe('basic HMR', () => {
       }
     })
 
+    it('should recover after webpack parse error in an imported file', async () => {
+      let browser
+      const aboutPage = join('pages', 'hmr', 'about8.js')
+
+      const aboutContent = await next.readFile(aboutPage)
+      try {
+        browser = await webdriver(next.appPort, basePath + '/hmr/about8')
+        await check(() => getBrowserBodyText(browser), /This is the about page/)
+
+        await next.patchFile(
+          aboutPage,
+          aboutContent.replace(
+            'export default',
+            'import "../../components/parse-error.xyz"\nexport default'
+          )
+        )
+
+        await assertHasRedbox(browser)
+        expect(await getRedboxHeader(browser)).toMatch('Failed to compile')
+
+        if (process.env.TURBOPACK) {
+          expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
+              "./components/parse-error.xyz
+              Unknown module type
+              This module doesn't have an associated type. Use a known file extension, or register a loader for it.
+
+              Read more: https://nextjs.org/docs/app/api-reference/next-config-js/turbo#webpack-loaders"
+            `)
+        } else {
+          expect(await getRedboxSource(browser)).toMatchInlineSnapshot(`
+                      "./components/parse-error.xyz
+                      Module parse failed: Unexpected token (3:0)
+                      You may need an appropriate loader to handle this file type, currently no loaders are configured to process this file. See https://webpack.js.org/concepts#loaders
+                      | This
+                      | is
+                      > }}}
+                      | invalid
+                      | js
+
+                      Import trace for requested module:
+                      ./components/parse-error.xyz
+                      ./pages/hmr/about8.js"
+                  `)
+        }
+        await next.patchFile(aboutPage, aboutContent)
+
+        await check(() => getBrowserBodyText(browser), /This is the about page/)
+        await assertNoRedbox(browser)
+      } catch (err) {
+        await next.patchFile(aboutPage, aboutContent)
+
+        if (browser) {
+          await check(
+            () => getBrowserBodyText(browser),
+            /This is the about page/
+          )
+        }
+
+        throw err
+      } finally {
+        if (browser) {
+          await browser.close()
+        }
+      }
+    })
+
+    it('should recover after loader parse error in an imported file', async () => {
+      let browser
+      const aboutPage = join('pages', 'hmr', 'about9.js')
+
+      const aboutContent = await next.readFile(aboutPage)
+      try {
+        browser = await webdriver(next.appPort, basePath + '/hmr/about9')
+        await check(() => getBrowserBodyText(browser), /This is the about page/)
+
+        await next.patchFile(
+          aboutPage,
+          aboutContent.replace(
+            'export default',
+            'import "../../components/parse-error.js"\nexport default'
+          )
+        )
+
+        await assertHasRedbox(browser)
+        expect(await getRedboxHeader(browser)).toMatch('Failed to compile')
+        let redboxSource = await getRedboxSource(browser)
+
+        redboxSource = redboxSource.replace(`${next.testDir}`, '.')
+        if (process.env.TURBOPACK) {
+          expect(next.normalizeTestDirContent(redboxSource))
+            .toMatchInlineSnapshot(`
+              "./components/parse-error.js:3:1
+              Parsing ecmascript source code failed
+                1 | This
+                2 | is
+              > 3 | }}}
+                  | ^
+                4 | invalid
+                5 | js
+
+              Expression expected"
+            `)
+        } else {
+          redboxSource = redboxSource.substring(
+            0,
+            redboxSource.indexOf('`----')
+          )
+
+          expect(next.normalizeTestDirContent(redboxSource))
+            .toMatchInlineSnapshot(`
+            "./components/parse-error.js
+            Error:   x Expression expected
+               ,-[3:1]
+             1 | This
+             2 | is
+             3 | }}}
+               : ^
+             4 | invalid
+             5 | js
+               "
+          `)
+        }
+
+        await next.patchFile(aboutPage, aboutContent)
+
+        await check(() => getBrowserBodyText(browser), /This is the about page/)
+        await assertNoRedbox(browser)
+      } catch (err) {
+        await next.patchFile(aboutPage, aboutContent)
+
+        if (browser) {
+          await check(
+            () => getBrowserBodyText(browser),
+            /This is the about page/
+          )
+        }
+      } finally {
+        if (browser) {
+          await browser.close()
+        }
+      }
+    })
+
     it('should recover from errors in getInitialProps in client', async () => {
       let browser
       const erroredPage = join('pages', 'hmr', 'error-in-gip.js')
       const errorContent = await next.readFile(erroredPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr')
+        browser = await webdriver(next.url, basePath + '/hmr')
         await browser.elementByCss('#error-in-gip-link').click()
 
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxHeader(browser)).toMatchInlineSnapshot(`
-          " 1 of 1 unhandled error
-          Unhandled Runtime Error
-
-          Error: an-expected-error-in-gip"
-        `)
+        await assertHasRedbox(browser)
+        expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
+          `"Error: an-expected-error-in-gip"`
+        )
 
         await next.patchFile(
           erroredPage,
@@ -732,17 +1021,12 @@ describe('basic HMR', () => {
       const erroredPage = join('pages', 'hmr', 'error-in-gip.js')
       const errorContent = await next.readFile(erroredPage)
       try {
-        browser = await webdriver(next.appPort, '/hmr/error-in-gip')
+        browser = await webdriver(next.url, basePath + '/hmr/error-in-gip')
 
-        expect(await hasRedbox(browser)).toBe(true)
-        expect(await getRedboxHeader(browser)).toMatchInlineSnapshot(`
-          " 1 of 1 unhandled error
-          Server Error
-
-          Error: an-expected-error-in-gip
-
-          This error happened while generating the page. Any console logs will be displayed in the terminal window."
-        `)
+        await assertHasRedbox(browser)
+        expect(await getRedboxDescription(browser)).toMatchInlineSnapshot(
+          `"Error: an-expected-error-in-gip"`
+        )
 
         const erroredPage = join('pages', 'hmr', 'error-in-gip.js')
 
@@ -780,34 +1064,33 @@ describe('basic HMR', () => {
     it('should warn about full reload in cli output - anonymous page function', async () => {
       const start = next.cliOutput.length
       const browser = await webdriver(
-        next.appPort,
-        `/hmr/anonymous-page-function`
+        next.url,
+        basePath + '/hmr/anonymous-page-function'
       )
+      const cliWarning =
+        'Fast Refresh had to perform a full reload when ./pages/hmr/anonymous-page-function.js changed. Read more: https://nextjs.org/docs/messages/fast-refresh-reload'
+
       expect(await browser.elementByCss('p').text()).toBe('hello world')
-      expect(next.cliOutput.slice(start)).not.toContain(
-        'Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/basic-features/fast-refresh#how-it-works'
-      )
+      expect(next.cliOutput.slice(start)).not.toContain(cliWarning)
 
       const currentFileContent = await next.readFile(
         './pages/hmr/anonymous-page-function.js'
       )
       const newFileContent = currentFileContent.replace(
         '<p>hello world</p>',
-        '<p>hello world!!!</p>'
+        '<p id="updated">hello world!!!</p>'
       )
       await next.patchFile(
         './pages/hmr/anonymous-page-function.js',
         newFileContent
       )
-      await check(() => browser.elementByCss('p').text(), 'hello world!!!')
 
-      // CLI warning and stacktrace
-      expect(next.cliOutput.slice(start)).toContain(
-        'Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/basic-features/fast-refresh#how-it-works'
+      expect(await browser.waitForElementByCss('#updated').text()).toBe(
+        'hello world!!!'
       )
-      expect(next.cliOutput.slice(start)).toContain(
-        'Error: Aborted because ./pages/hmr/anonymous-page-function.js is not accepted'
-      )
+
+      // CLI warning
+      expect(next.cliOutput.slice(start)).toContain(cliWarning)
 
       // Browser warning
       const browserLogs = await browser.log()
@@ -822,29 +1105,31 @@ describe('basic HMR', () => {
 
     it('should warn about full reload in cli output - runtime-error', async () => {
       const start = next.cliOutput.length
-      const browser = await webdriver(next.appPort, `/hmr/runtime-error`)
+      const browser = await webdriver(next.url, basePath + '/hmr/runtime-error')
+      const cliWarning =
+        'Fast Refresh had to perform a full reload due to a runtime error.'
+
       await check(
         () => getRedboxHeader(browser),
         /ReferenceError: whoops is not defined/
       )
-      expect(next.cliOutput.slice(start)).not.toContain(
-        'Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/basic-features/fast-refresh#how-it-works'
-      )
+      expect(next.cliOutput.slice(start)).not.toContain(cliWarning)
 
       const currentFileContent = await next.readFile(
         './pages/hmr/runtime-error.js'
       )
-      const newFileContent = currentFileContent.replace('whoops', '"whoops"')
+      const newFileContent = currentFileContent.replace(
+        'whoops',
+        '<p id="updated">whoops</p>'
+      )
       await next.patchFile('./pages/hmr/runtime-error.js', newFileContent)
-      await check(() => browser.elementByCss('body').text(), 'whoops')
 
-      // CLI warning and stacktrace
-      expect(next.cliOutput.slice(start)).toContain(
-        'Fast Refresh had to perform a full reload. Read more: https://nextjs.org/docs/basic-features/fast-refresh#how-it-works'
+      expect(await browser.waitForElementByCss('#updated').text()).toBe(
+        'whoops'
       )
-      expect(next.cliOutput.slice(start)).not.toContain(
-        'Error: Aborted because ./pages/runtime-error.js is not accepted'
-      )
+
+      // CLI warning
+      expect(next.cliOutput.slice(start)).toContain(cliWarning)
 
       // Browser warning
       const browserLogs = await browser.log()
@@ -858,47 +1143,73 @@ describe('basic HMR', () => {
     })
   })
 
-  it('should have client HMR events in trace file', async () => {
-    const traceData = await next.readFile('.next/trace')
-    expect(traceData).toContain('client-hmr-latency')
-    expect(traceData).toContain('client-error')
-    expect(traceData).toContain('client-success')
-    expect(traceData).toContain('client-full-reload')
-  })
+  if (!process.env.TURBOPACK) {
+    it('should have client HMR events in trace file', async () => {
+      const traceData = await next.readFile('.next/trace')
+      expect(traceData).toContain('client-hmr-latency')
+      expect(traceData).toContain('client-error')
+      expect(traceData).toContain('client-success')
+      expect(traceData).toContain('client-full-reload')
+    })
+  }
 
   it('should have correct compile timing after fixing error', async () => {
     const pageName = 'pages/auto-export-is-ready.js'
     const originalContent = await next.readFile(pageName)
 
     try {
-      const browser = await webdriver(next.url, '/auto-export-is-ready')
+      const browser = await webdriver(
+        next.url,
+        basePath + '/auto-export-is-ready'
+      )
       const outputLength = next.cliOutput.length
       await next.patchFile(
         pageName,
         `import hello from 'non-existent'\n` + originalContent
       )
-      expect(await hasRedbox(browser, true)).toBe(true)
+      await assertHasRedbox(browser)
       await waitFor(3000)
       await next.patchFile(pageName, originalContent)
-      await check(
-        () => next.cliOutput.substring(outputLength),
-        /compiled.*?successfully/i
-      )
-      const compileTime = next.cliOutput
-        .substring(outputLength)
-        .match(/compiled.*?successfully in ([\d.]{1,})\s?(?:s|ms)/i)
+      await check(() => next.cliOutput.substring(outputLength), /Compiled.*?/i)
+      const compileTimeStr = next.cliOutput.substring(outputLength)
 
-      let compileTimeMs = parseFloat(compileTime[1])
-      if (
-        next.cliOutput
-          .substring(outputLength)
-          .match(/compiled.*?successfully in ([\d.]{1,})\s?s/)
-      ) {
+      const matches = [
+        ...compileTimeStr.match(/Compiled.*? in ([\d.]{1,})\s?(?:s|ms)/i),
+      ]
+      const [, compileTime, timeUnit] = matches
+
+      let compileTimeMs = parseFloat(compileTime)
+      if (timeUnit === 's') {
         compileTimeMs = compileTimeMs * 1000
       }
       expect(compileTimeMs).toBeLessThan(3000)
     } finally {
       await next.patchFile(pageName, originalContent)
     }
+  })
+
+  it('should reload the page when the server restarts', async () => {
+    const browser = await webdriver(next.url, basePath + '/hmr/about', {
+      headless: false,
+    })
+    await check(() => getBrowserBodyText(browser), /This is the about page/)
+
+    await next.destroy()
+
+    let reloadPromise = new Promise((resolve) => {
+      browser.on('request', (req) => {
+        if (req.url().endsWith('/hmr/about')) {
+          resolve(req.url())
+        }
+      })
+    })
+
+    next = await createNext({
+      files: join(__dirname, 'hmr'),
+      nextConfig,
+      forcedPort: next.appPort,
+    })
+
+    await reloadPromise
   })
 })

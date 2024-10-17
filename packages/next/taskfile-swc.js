@@ -1,6 +1,8 @@
 // taskr babel plugin with Babel 7 support
 // https://github.com/lukeed/taskr/pull/305
 
+const MODERN_BROWSERSLIST_TARGET = require('./src/shared/lib/modern-browserslist-target')
+
 const path = require('path')
 
 // eslint-disable-next-line import/no-extraneous-dependencies
@@ -14,39 +16,41 @@ module.exports = function (task) {
     function* (
       file,
       serverOrClient,
-      {
-        stripExtension,
-        keepImportAssertions = false,
-        interopClientDefaultExport = false,
-      } = {}
+      { stripExtension, interopClientDefaultExport = false, esm = false } = {}
     ) {
       // Don't compile .d.ts
-      if (file.base.endsWith('.d.ts')) return
+      if (file.base.endsWith('.d.ts') || file.base.endsWith('.json')) return
 
       const isClient = serverOrClient === 'client'
-
       /** @type {import('@swc/core').Options} */
       const swcClientOptions = {
-        module: {
-          type: 'commonjs',
-          ignoreDynamic: true,
+        module: esm
+          ? {
+              type: 'es6',
+            }
+          : {
+              type: 'commonjs',
+              ignoreDynamic: true,
+              exportInteropAnnotation: true,
+            },
+        env: {
+          targets: MODERN_BROWSERSLIST_TARGET,
         },
         jsc: {
           loose: true,
           externalHelpers: true,
-          target: 'es2016',
           parser: {
             syntax: 'typescript',
             dynamicImport: true,
-            importAssertions: true,
+            importAttributes: true,
             tsx: file.base.endsWith('.tsx'),
           },
           experimental: {
-            keepImportAssertions,
+            keepImportAttributes: esm,
           },
           transform: {
             react: {
-              pragma: 'React.createElement',
+              runtime: 'automatic',
               pragmaFrag: 'React.Fragment',
               throwIfNamespace: true,
               development: false,
@@ -58,32 +62,40 @@ module.exports = function (task) {
 
       /** @type {import('@swc/core').Options} */
       const swcServerOptions = {
-        module: {
-          type: 'commonjs',
-          ignoreDynamic: true,
-        },
+        module: esm
+          ? {
+              type: 'es6',
+            }
+          : {
+              type: 'commonjs',
+              ignoreDynamic: true,
+              exportInteropAnnotation: true,
+            },
         env: {
           targets: {
-            node: '12.0.0',
+            // Ideally, should be same version defined in packages/next/package.json#engines
+            // Currently a few minors behind due to babel class transpiling
+            // which fails "test/integration/mixed-ssg-serverprops-error/test/index.test.js"
+            node: '16.8.0',
           },
         },
         jsc: {
           loose: true,
           // Do not enable external helpers on server-side files build
-          // _is_native_funtion helper is not compatible with edge runtime (need investigate)
+          // _is_native_function helper is not compatible with edge runtime (need investigate)
           externalHelpers: false,
           parser: {
             syntax: 'typescript',
             dynamicImport: true,
-            importAssertions: true,
+            importAttributes: true,
             tsx: file.base.endsWith('.tsx'),
           },
           experimental: {
-            keepImportAssertions,
+            keepImportAttributes: esm,
           },
           transform: {
             react: {
-              pragma: 'React.createElement',
+              runtime: 'automatic',
               pragmaFrag: 'React.Fragment',
               throwIfNamespace: true,
               development: false,
@@ -97,29 +109,48 @@ module.exports = function (task) {
 
       const filePath = path.join(file.dir, file.base)
       const fullFilePath = path.join(__dirname, filePath)
-      const distFilePath = path.dirname(path.join(__dirname, 'dist', filePath))
+      const distFilePath = path.dirname(
+        // we must strip src from filePath as it isn't carried into
+        // the dist file path
+        path.join(__dirname, 'dist', filePath.replace(/^src[/\\]/, ''))
+      )
 
       const options = {
         filename: path.join(file.dir, file.base),
         sourceMaps: true,
-        inlineSourcesContent: false,
+        inlineSourcesContent: true,
         sourceFileName: path.relative(distFilePath, fullFilePath),
 
         ...swcOptions,
       }
 
-      const output = yield transform(file.data.toString('utf-8'), options)
+      const source = file.data.toString('utf-8')
+      const output = yield transform(source, options)
       const ext = path.extname(file.base)
+
+      // Make sure the output content keeps the `"use client"` directive.
+      // TODO: Remove this once SWC fixes the issue.
+      if (/^['"]use client['"]/.test(source)) {
+        output.code =
+          '"use client";\n' +
+          output.code
+            .split('\n')
+            .map((l) => (/^['"]use client['"]/.test(l) ? '' : l))
+            .join('\n')
+      }
 
       // Replace `.ts|.tsx` with `.js` in files with an extension
       if (ext) {
         const extRegex = new RegExp(ext.replace('.', '\\.') + '$', 'i')
         // Remove the extension if stripExtension is enabled or replace it with `.js`
-        file.base = file.base.replace(extRegex, stripExtension ? '' : '.js')
+        file.base = file.base.replace(
+          extRegex,
+          stripExtension ? '' : `.${ext === '.mts' ? 'm' : ''}js`
+        )
       }
 
       if (output.map) {
-        if (interopClientDefaultExport) {
+        if (interopClientDefaultExport && !esm) {
           output.code += `
 if ((typeof exports.default === 'function' || (typeof exports.default === 'object' && exports.default !== null)) && typeof exports.default.__esModule === 'undefined') {
   Object.defineProperty(exports.default, '__esModule', { value: true });
@@ -147,8 +178,21 @@ if ((typeof exports.default === 'function' || (typeof exports.default === 'objec
 }
 
 function setNextVersion(code) {
-  return code.replace(
-    /process\.env\.__NEXT_VERSION/g,
-    `"${require('./package.json').version}"`
-  )
+  return code
+    .replace(
+      /process\.env\.__NEXT_VERSION/g,
+      `"${require('./package.json').version}"`
+    )
+    .replace(
+      /process\.env\.__NEXT_REQUIRED_NODE_VERSION/g,
+      `"${require('./package.json').engines.node.replace('>=', '')}"`
+    )
+    .replace(
+      /process\.env\.REQUIRED_APP_REACT_VERSION/,
+      `"${
+        require('../../package.json').devDependencies[
+          'react-server-dom-webpack'
+        ]
+      }"`
+    )
 }

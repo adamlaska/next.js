@@ -1,8 +1,8 @@
-import Link from 'next/link'
-import Head from 'next/head'
-import { allPosts } from 'contentlayer/generated'
-import { pick } from '@contentlayer/client'
-import utilStyles from '../styles/utils.module.css'
+import Link from "next/link";
+import Head from "next/head";
+import { allPosts } from "contentlayer/generated";
+import { pick } from "@contentlayer/client";
+import utilStyles from "../styles/utils.module.css";
 
 export default function Home({ posts }) {
   return (
@@ -16,9 +16,7 @@ export default function Home({ posts }) {
         <ul className={utilStyles.list}>
           {posts.map(({ slug, date, title }) => (
             <li className={utilStyles.listItem} key={slug}>
-              <Link href={`/posts/${slug}`}>
-                <a>{title}</a>
-              </Link>
+              <Link href={`/posts/${slug}`}>{title}</Link>
               <br />
               <small className={utilStyles.lightText}>{date}</small>
             </li>
@@ -26,11 +24,11 @@ export default function Home({ posts }) {
         </ul>
       </section>
     </>
-  )
+  );
 }
 
 export async function getStaticProps() {
-  const posts = allPosts.map((post) => pick(post, ['title', 'date', 'slug']))
+  const posts = allPosts.map((post) => pick(post, ["title", "date", "slug"]));
 
-  return { props: { posts } }
+  return { props: { posts } };
 }

@@ -1,18 +1,10 @@
-import rule from '@next/eslint-plugin-next/lib/rules/google-font-display'
-import { RuleTester } from 'eslint'
-;(RuleTester as any).setDefaultConfig({
-  parserOptions: {
-    ecmaVersion: 2020,
-    sourceType: 'module',
-    ecmaFeatures: {
-      modules: true,
-      jsx: true,
-    },
-  },
-})
-const ruleTester = new RuleTester()
+import { RuleTester as ESLintTesterV8 } from 'eslint-v8'
+import { RuleTester as ESLintTesterV9 } from 'eslint'
+import { rules } from '@next/eslint-plugin-next'
 
-ruleTester.run('google-font-display', rule, {
+const NextESLintRule = rules['google-font-display']
+
+const tests = {
   valid: [
     `import Head from "next/head";
 
@@ -47,6 +39,27 @@ ruleTester.run('google-font-display', rule, {
               <link
                 href="https://fonts.googleapis.com/css?family=Krona+One&display=swap"
                 rel="stylesheet"
+              />
+            </Head>
+          </Html>
+        );
+      }
+     }
+
+     export default MyDocument;
+    `,
+
+    `import Document, { Html, Head } from "next/document";
+
+     class MyDocument extends Document {
+      render() {
+        return (
+          <Html>
+            <Head>
+              <link
+                href="https://fonts.googleapis.com/css?family=Krona+One&display=swap"
+                rel="stylesheet"
+                crossOrigin=""
               />
             </Head>
           </Html>
@@ -148,4 +161,30 @@ ruleTester.run('google-font-display', rule, {
       ],
     },
   ],
+}
+
+describe('google-font-display', () => {
+  new ESLintTesterV8({
+    parserOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'module',
+      ecmaFeatures: {
+        modules: true,
+        jsx: true,
+      },
+    },
+  }).run('eslint-v8', NextESLintRule, tests)
+
+  new ESLintTesterV9({
+    languageOptions: {
+      ecmaVersion: 2020,
+      sourceType: 'module',
+      parserOptions: {
+        ecmaFeatures: {
+          modules: true,
+          jsx: true,
+        },
+      },
+    },
+  }).run('eslint-v9', NextESLintRule, tests)
 })

@@ -2,11 +2,15 @@ import fs from 'fs-extra'
 import { join } from 'path'
 import { fetchViaHTTP } from 'next-test-utils'
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 
 jest.setTimeout(2 * 60 * 1000)
 
-export function runTests(example = '') {
+export function runTests(
+  example = '',
+  testPath = '/',
+  expectedContent = ['index page']
+) {
   const versionParts = process.versions.node.split('.').map((i) => Number(i))
 
   if ((global as any).isNextDeploy) {
@@ -25,14 +29,22 @@ export function runTests(example = '') {
       const srcFiles = await fs.readdir(srcDir)
 
       const packageJson = await fs.readJson(join(srcDir, 'package.json'))
+      // Use the default versions that are usually used in tests.
+      // Since we replace `next` in the install, we also need to fulfill the peerDependencies.
+      // However, the example specified latest next which may have different peerDependencies that the next that we test here i.e. the next on this commit.
+      delete packageJson.dependencies['react']
+      delete packageJson.dependencies['react-dom']
 
       next = await createNext({
-        files: srcFiles.reduce((prev, file) => {
-          if (file !== 'package.json') {
-            prev[file] = new FileRef(join(srcDir, file))
-          }
-          return prev
-        }, {} as { [key: string]: FileRef }),
+        files: srcFiles.reduce(
+          (prev, file) => {
+            if (file !== 'package.json') {
+              prev[file] = new FileRef(join(srcDir, file))
+            }
+            return prev
+          },
+          {} as { [key: string]: FileRef }
+        ),
         dependencies: {
           ...packageJson.dependencies,
           ...packageJson.devDependencies,
@@ -42,7 +54,7 @@ export function runTests(example = '') {
             prev.push(`${cur}@${dependencies[cur]}`)
             return prev
           }, [] as string[])
-          return `yarn set version 4.0.0-rc.13 && yarn config set enableGlobalCache true && yarn config set compressionLevel 0 && yarn add ${pkgs.join(
+          return `yarn set version berry && yarn config set enableGlobalCache true && yarn config set compressionLevel 0 && yarn add ${pkgs.join(
             ' '
           )}`
         },
@@ -55,9 +67,14 @@ export function runTests(example = '') {
     afterAll(() => next?.destroy())
 
     it(`should compile and serve the index page correctly ${example}`, async () => {
-      const res = await fetchViaHTTP(next.url, '/')
+      const res = await fetchViaHTTP(next.url, testPath)
       expect(res.status).toBe(200)
-      expect(await res.text()).toContain('<html')
+
+      const text = await res.text()
+
+      for (const content of expectedContent) {
+        expect(text).toContain(content)
+      }
     })
   } else {
     it('should not run PnP test for older node versions', () => {})

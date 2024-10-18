@@ -2,10 +2,10 @@ import { createNext, FileRef } from 'e2e-utils'
 import { renderViaHTTP } from 'next-test-utils'
 import cheerio from 'cheerio'
 import webdriver from 'next-webdriver'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import { join } from 'path'
 
-describe('should set-up next', () => {
+describe('next/head', () => {
   let next: NextInstance
 
   beforeAll(async () => {
@@ -27,7 +27,7 @@ describe('should set-up next', () => {
     })
 
     expect(html).toContain(
-      `<meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta name="test-head-1" content="hello">`
+      `<meta charset="utf-8" data-next-head=""><meta name="viewport" content="width=device-width" data-next-head=""><meta name="test-head-1" content="hello" data-next-head="">`
     )
   })
 

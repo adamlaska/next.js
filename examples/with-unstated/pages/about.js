@@ -1,17 +1,15 @@
-import Link from 'next/link'
-import ClockContainer from '../containers/clock'
-import CounterContainer from '../containers/counter'
-import Clock from '../components/Clock'
-import Counter from '../components/Counter'
+import Link from "next/link";
+import ClockContainer from "../containers/clock";
+import CounterContainer from "../containers/counter";
+import Clock from "../components/Clock";
+import Counter from "../components/Counter";
 
 export default function Index() {
   return (
     <CounterContainer.Provider>
       <ClockContainer.Provider>
         <div>
-          <Link href="/">
-            <a>go to Index</a>
-          </Link>
+          <Link href="/">go to Index</Link>
           <br />
           <br />
           <div>
@@ -21,5 +19,5 @@ export default function Index() {
         </div>
       </ClockContainer.Provider>
     </CounterContainer.Provider>
-  )
+  );
 }

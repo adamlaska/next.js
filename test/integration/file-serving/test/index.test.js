@@ -24,9 +24,14 @@ const expectStatus = async (path) => {
     if (res.status === 308) {
       const redirectDest = res.headers.get('location')
       const parsedUrl = url.parse(redirectDest, true)
-      expect(parsedUrl.hostname).toBe('localhost')
+      expect(parsedUrl.hostname).toBeOneOf(['localhost', '127.0.0.1'])
     } else {
-      expect(res.status === 400 || res.status === 404).toBe(true)
+      try {
+        expect(res.status === 400 || res.status === 404).toBe(true)
+      } catch (err) {
+        require('console').error({ path, status: res.status })
+        throw err
+      }
       expect(await res.text()).toMatch(containRegex)
     }
   }
@@ -4460,45 +4465,50 @@ const copyTestFileToDist = () =>
   fs.copy(join(appDir, 'test-file.txt'), join(appDir, '.next', 'test-file.txt'))
 
 describe('File Serving', () => {
-  describe('dev mode', () => {
-    beforeAll(async () => {
-      appPort = await findPort()
-      app = await launchApp(appDir, appPort, {
-        // don't log stdout and stderr as we're going to generate
-        // a lot of output from resolve mismatches
-        stdout: false,
-        stderr: false,
+  ;(process.env.TURBOPACK_BUILD ? describe.skip : describe)(
+    'development mode',
+    () => {
+      beforeAll(async () => {
+        appPort = await findPort()
+        app = await launchApp(appDir, appPort, {
+          // don't log stdout and stderr as we're going to generate
+          // a lot of output from resolve mismatches
+          stdout: false,
+          stderr: false,
+        })
+        await copyTestFileToDist()
       })
-      await copyTestFileToDist()
-    })
-    afterAll(async () => {
-      await killApp(app)
-    })
-
-    runTests(true)
-  })
-
-  describe('production mode', () => {
-    beforeAll(async () => {
-      const { code } = await nextBuild(appDir)
-
-      if (code !== 0) {
-        throw new Error(`Failed to build got code: ${code}`)
-      }
-      await copyTestFileToDist()
-
-      appPort = await findPort()
-      app = await nextStart(appDir, appPort, {
-        // don't log stdout and stderr as we're going to generate
-        // a lot of output from resolve mismatches
-        stdout: false,
-        stderr: false,
+      afterAll(async () => {
+        await killApp(app)
       })
-    })
-    afterAll(async () => {
-      await killApp(app)
-    })
 
-    runTests()
-  })
+      runTests(true)
+    }
+  )
+  ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+    'production mode',
+    () => {
+      beforeAll(async () => {
+        const { code } = await nextBuild(appDir)
+
+        if (code !== 0) {
+          throw new Error(`Failed to build got code: ${code}`)
+        }
+        await copyTestFileToDist()
+
+        appPort = await findPort()
+        app = await nextStart(appDir, appPort, {
+          // don't log stdout and stderr as we're going to generate
+          // a lot of output from resolve mismatches
+          stdout: false,
+          stderr: false,
+        })
+      })
+      afterAll(async () => {
+        await killApp(app)
+      })
+
+      runTests()
+    }
+  )
 })

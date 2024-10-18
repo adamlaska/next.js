@@ -1,14 +1,14 @@
 # Headers Example
 
-This example shows how to use [headers in Next.js](https://nextjs.org/docs/api-reference/next.config.js/headers) to add custom HTTP headers into your Next.js app.
+This example shows how to use [headers in Next.js](https://nextjs.org/docs/app/api-reference/next-config-js/headers) to add custom HTTP headers into your Next.js app.
 
-The index page ([`pages/index.js`](pages/index.js)) has a list of links to pages with custom headers set up in [`next.config.js`](next.config.js). Run or deploy the app to see how it works!
+The index page ([`app/page.tsx`](app/page.tsx)) has a list of links to pages with custom headers set up in [`next.config.js`](next.config.js). Run or deploy the app to see how it works!
 
 ## Deploy your own
 
 Deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example) or preview live with [StackBlitz](https://stackblitz.com/github/vercel/next.js/tree/canary/examples/headers)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/headers&project-name=headers&repository-name=headers)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/headers&project-name=headers&repository-name=headers)
 
 ## How to use
 

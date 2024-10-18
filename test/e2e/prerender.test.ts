@@ -4,18 +4,22 @@ import cheerio from 'cheerio'
 import { join, sep } from 'path'
 import escapeRegex from 'escape-string-regexp'
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import {
+  assertHasRedbox,
   check,
   fetchViaHTTP,
   getBrowserBodyText,
   getRedboxHeader,
-  hasRedbox,
   normalizeRegEx,
   renderViaHTTP,
+  retry,
   waitFor,
 } from 'next-test-utils'
 import webdriver from 'next-webdriver'
+import stripAnsi from 'strip-ansi'
+
+const isReact18 = parseInt(process.env.NEXT_TEST_REACT_VERSION) === 18
 
 describe('Prerender', () => {
   let next: NextInstance
@@ -752,20 +756,6 @@ describe('Prerender', () => {
       expect(value).toMatch(/Hi \[third\] \[fourth\]/)
     })
 
-    if (!(global as any).isNextDeploy) {
-      it('should show error about renaming unstable_revalidate', async () => {
-        const res = await fetchViaHTTP(next.url, '/api/manual-revalidate', {
-          pathname: '/blog/first',
-          deprecated: '1',
-        })
-        expect(res.status).toBe(500)
-
-        expect(next.cliOutput).toContain(
-          '"unstable_revalidate" has been renamed to "revalidate"'
-        )
-      })
-    }
-
     if ((global as any).isNextStart) {
       // TODO: dev currently renders this page as blocking, meaning it shows the
       // server error instead of continuously retrying. Do we want to change this?
@@ -858,7 +848,9 @@ describe('Prerender', () => {
     })
 
     it('should handle fallback only page correctly HTML', async () => {
-      const browser = await webdriver(next.url, '/fallback-only/first%2Fpost')
+      const browser = await webdriver(next.url, '/fallback-only/first%2Fpost', {
+        waitHydration: false,
+      })
 
       const text = await browser.elementByCss('p').text()
       expect(text).toContain('hi fallback')
@@ -981,10 +973,42 @@ describe('Prerender', () => {
     })
 
     if ((global as any).isNextDev) {
+      it('should show warning every time page with large amount of page data is returned', async () => {
+        await renderViaHTTP(next.url, '/large-page-data-ssr')
+        await check(
+          () => next.cliOutput,
+          /Warning: data for page "\/large-page-data-ssr" is 256 kB which exceeds the threshold of 128 kB, this amount of data can reduce performance/
+        )
+
+        const outputIndex = next.cliOutput.length
+        await renderViaHTTP(next.url, '/large-page-data-ssr')
+        await check(
+          () => next.cliOutput.slice(outputIndex),
+          /Warning: data for page "\/large-page-data-ssr" is 256 kB which exceeds the threshold of 128 kB, this amount of data can reduce performance/
+        )
+      })
+    }
+
+    if ((global as any).isNextStart) {
+      it('should only show warning once per page when large amount of page data is returned', async () => {
+        await renderViaHTTP(next.url, '/large-page-data-ssr')
+        await check(
+          () => next.cliOutput,
+          /Warning: data for page "\/large-page-data-ssr" is 256 kB which exceeds the threshold of 128 kB, this amount of data can reduce performance/
+        )
+
+        const outputIndex = next.cliOutput.length
+        await renderViaHTTP(next.url, '/large-page-data-ssr')
+        expect(next.cliOutput.slice(outputIndex)).not.toInclude(
+          'Warning: data for page'
+        )
+      })
+    }
+
+    if ((global as any).isNextDev) {
       it('should not show warning from url prop being returned', async () => {
-        const urlPropPage = 'pages/url-prop.js'
         await next.patchFile(
-          urlPropPage,
+          'pages/url-prop.js',
           `
         export async function getStaticProps() {
           return {
@@ -995,15 +1019,16 @@ describe('Prerender', () => {
         }
 
         export default ({ url }) => <p>url: {url}</p>
-      `
+      `,
+          async () =>
+            retry(async () => {
+              const html = await renderViaHTTP(next.url, '/url-prop')
+              expect(next.cliOutput).not.toMatch(
+                /The prop `url` is a reserved prop in Next.js for legacy reasons and will be overridden on page \/url-prop/
+              )
+              expect(html).toMatch(/url:.*?something/)
+            })
         )
-
-        const html = await renderViaHTTP(next.url, '/url-prop')
-        await next.deleteFile(urlPropPage)
-        expect(next.cliOutput).not.toMatch(
-          /The prop `url` is a reserved prop in Next.js for legacy reasons and will be overridden on page \/url-prop/
-        )
-        expect(html).toMatch(/url:.*?something/)
       })
 
       it('should always show fallback for page not in getStaticPaths', async () => {
@@ -1056,31 +1081,31 @@ describe('Prerender', () => {
         expect(JSON.parse($2('#__NEXT_DATA__').text()).isFallback).toBe(false)
       })
 
-      it('should log error in console and browser in dev mode', async () => {
-        const indexPage = 'pages/index.js'
-        const origContent = await next.readFile(indexPage)
-
+      it('should log error in console and browser in development mode', async () => {
         const browser = await webdriver(next.url, '/')
         expect(await browser.elementByCss('p').text()).toMatch(/hello.*?world/)
 
         await next.patchFile(
-          indexPage,
-          origContent
-            .replace('// throw new', 'throw new')
-            .replace('{/* <div', '<div')
-            .replace('</div> */}', '</div>')
+          'pages/index.js',
+          (content) =>
+            content
+              .replace('// throw new', 'throw new')
+              .replace('{/* <div', '<div')
+              .replace('</div> */}', '</div>'),
+          async () => {
+            await browser.waitForElementByCss('#after-change')
+            // we need to reload the page to trigger getStaticProps
+            await browser.refresh()
+
+            return retry(async () => {
+              await assertHasRedbox(browser)
+              const errOverlayContent = await getRedboxHeader(browser)
+              const errorMsg = /oops from getStaticProps/
+              expect(next.cliOutput).toMatch(errorMsg)
+              expect(errOverlayContent).toMatch(errorMsg)
+            })
+          }
         )
-        await browser.waitForElementByCss('#after-change')
-        // we need to reload the page to trigger getStaticProps
-        await browser.refresh()
-
-        expect(await hasRedbox(browser)).toBe(true)
-        const errOverlayContent = await getRedboxHeader(browser)
-
-        await next.patchFile(indexPage, origContent)
-        const errorMsg = /oops from getStaticProps/
-        expect(next.cliOutput).toMatch(errorMsg)
-        expect(errOverlayContent).toMatch(errorMsg)
       })
 
       it('should always call getStaticProps without caching in dev', async () => {
@@ -1107,25 +1132,20 @@ describe('Prerender', () => {
       })
 
       it('should error on bad object from getStaticProps', async () => {
-        const indexPage = 'pages/index.js'
-        const origContent = await next.readFile(indexPage)
         await next.patchFile(
-          indexPage,
-          origContent.replace(/\/\/ bad-prop/, 'another: true,')
+          'pages/index.js',
+          (content) => content.replace(/\/\/ bad-prop/, 'another: true,'),
+          async () =>
+            retry(async () => {
+              const html = await renderViaHTTP(next.url, '/')
+              expect(html).toMatch(/Additional keys were returned/)
+            })
         )
-        await waitFor(1000)
-        try {
-          const html = await renderViaHTTP(next.url, '/')
-          expect(html).toMatch(/Additional keys were returned/)
-        } finally {
-          await next.patchFile(indexPage, origContent)
-        }
       })
 
       it('should error on dynamic page without getStaticPaths', async () => {
-        const curPage = 'pages/temp/[slug].js'
         await next.patchFile(
-          curPage,
+          'pages/temp/[slug].js',
           `
           export async function getStaticProps() {
             return {
@@ -1135,23 +1155,20 @@ describe('Prerender', () => {
             }
           }
           export default () => 'oops'
-        `
+        `,
+          async () =>
+            retry(async () => {
+              const html = await renderViaHTTP(next.url, '/temp/hello')
+              expect(html).toMatch(
+                /getStaticPaths is required for dynamic SSG pages and is missing for/
+              )
+            })
         )
-        await waitFor(1000)
-        try {
-          const html = await renderViaHTTP(next.url, '/temp/hello')
-          expect(html).toMatch(
-            /getStaticPaths is required for dynamic SSG pages and is missing for/
-          )
-        } finally {
-          await next.deleteFile(curPage)
-        }
       })
 
       it('should error on dynamic page without getStaticPaths returning fallback property', async () => {
-        const curPage = 'pages/temp2/[slug].js'
         await next.patchFile(
-          curPage,
+          'pages/temp2/[slug].js',
           `
           export async function getStaticPaths() {
             return {
@@ -1166,15 +1183,13 @@ describe('Prerender', () => {
             }
           }
           export default () => 'oops'
-        `
+        `,
+          async () =>
+            retry(async () => {
+              const html = await renderViaHTTP(next.url, '/temp2/hello')
+              expect(html).toMatch(/`fallback` key must be returned from/)
+            })
         )
-        await waitFor(1000)
-        try {
-          const html = await renderViaHTTP(next.url, '/temp2/hello')
-          expect(html).toMatch(/`fallback` key must be returned from/)
-        } finally {
-          await next.deleteFile(curPage)
-        }
       })
 
       it('should not re-call getStaticProps when updating query', async () => {
@@ -1213,7 +1228,7 @@ describe('Prerender', () => {
         // )
 
         // FIXME: disable this
-        expect(await hasRedbox(browser)).toBe(true)
+        await assertHasRedbox(browser)
         expect(await getRedboxHeader(browser)).toMatch(
           /Failed to load static props/
         )
@@ -1229,7 +1244,7 @@ describe('Prerender', () => {
         // )
 
         // FIXME: disable this
-        expect(await hasRedbox(browser)).toBe(true)
+        await assertHasRedbox(browser)
         expect(await getRedboxHeader(browser)).toMatch(
           /Failed to load static props/
         )
@@ -1296,10 +1311,10 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/api\\-docs/(?<slug>.+?)\\.json$`,
+              )}/api\\-docs/(?<nxtPslug>.+?)\\.json$`,
               page: '/api-docs/[...slug]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             {
@@ -1326,9 +1341,9 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/blocking\\-fallback/(?<slug>[^/]+?)\\.json$`,
+              )}/blocking\\-fallback/(?<nxtPslug>[^/]+?)\\.json$`,
               page: '/blocking-fallback/[slug]',
-              routeKeys: { slug: 'slug' },
+              routeKeys: { nxtPslug: 'nxtPslug' },
             },
             {
               dataRouteRegex: normalizeRegEx(
@@ -1338,9 +1353,9 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/blocking\\-fallback\\-once/(?<slug>[^/]+?)\\.json$`,
+              )}/blocking\\-fallback\\-once/(?<nxtPslug>[^/]+?)\\.json$`,
               page: '/blocking-fallback-once/[slug]',
-              routeKeys: { slug: 'slug' },
+              routeKeys: { nxtPslug: 'nxtPslug' },
             },
             {
               dataRouteRegex: normalizeRegEx(
@@ -1350,9 +1365,9 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/blocking\\-fallback\\-some/(?<slug>[^/]+?)\\.json$`,
+              )}/blocking\\-fallback\\-some/(?<nxtPslug>[^/]+?)\\.json$`,
               page: '/blocking-fallback-some/[slug]',
-              routeKeys: { slug: 'slug' },
+              routeKeys: { nxtPslug: 'nxtPslug' },
             },
             {
               dataRouteRegex: normalizeRegEx(
@@ -1363,7 +1378,7 @@ describe('Prerender', () => {
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/blog/(?<post>[^/]+?)\\.json$`,
+              )}/blog/(?<nxtPpost>[^/]+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1371,13 +1386,13 @@ describe('Prerender', () => {
               ),
               page: '/blog/[post]',
               routeKeys: {
-                post: 'post',
+                nxtPpost: 'nxtPpost',
               },
             },
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/blog/(?<post>[^/]+?)/(?<comment>[^/]+?)\\.json$`,
+              )}/blog/(?<nxtPpost>[^/]+?)/(?<nxtPcomment>[^/]+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1385,14 +1400,14 @@ describe('Prerender', () => {
               ),
               page: '/blog/[post]/[comment]',
               routeKeys: {
-                post: 'post',
-                comment: 'comment',
+                nxtPpost: 'nxtPpost',
+                nxtPcomment: 'nxtPcomment',
               },
             },
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/catchall/(?<slug>.+?)\\.json$`,
+              )}/catchall/(?<nxtPslug>.+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1400,13 +1415,13 @@ describe('Prerender', () => {
               ),
               page: '/catchall/[...slug]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/catchall\\-explicit/(?<slug>.+?)\\.json$`,
+              )}/catchall\\-explicit/(?<nxtPslug>.+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1414,13 +1429,13 @@ describe('Prerender', () => {
               ),
               page: '/catchall-explicit/[...slug]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/catchall\\-optional(?:/(?<slug>.+?))?\\.json$`,
+              )}/catchall\\-optional(?:/(?<nxtPslug>.+?))?\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1428,7 +1443,7 @@ describe('Prerender', () => {
               ),
               page: '/catchall-optional/[[...slug]]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             {
@@ -1447,10 +1462,10 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/dynamic/(?<slug>[^/]+?)\\.json$`,
+              )}/dynamic/(?<nxtPslug>[^/]+?)\\.json$`,
               page: '/dynamic/[slug]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             {
@@ -1461,10 +1476,10 @@ describe('Prerender', () => {
               ),
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/fallback\\-only/(?<slug>[^/]+?)\\.json$`,
+              )}/fallback\\-only/(?<nxtPslug>[^/]+?)\\.json$`,
               page: '/fallback-only/[slug]',
               routeKeys: {
-                slug: 'slug',
+                nxtPslug: 'nxtPslug',
               },
             },
             // TODO: investigate index/index
@@ -1479,7 +1494,7 @@ describe('Prerender', () => {
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/lang/(?<lang>[^/]+?)/about\\.json$`,
+              )}/lang/(?<nxtPlang>[^/]+?)/about\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1487,7 +1502,7 @@ describe('Prerender', () => {
               ),
               page: '/lang/[lang]/about',
               routeKeys: {
-                lang: 'lang',
+                nxtPlang: 'nxtPlang',
               },
             },
             {
@@ -1497,9 +1512,15 @@ describe('Prerender', () => {
               page: '/large-page-data',
             },
             {
+              dataRouteRegex: `^\\/_next\\/data\\/${escapeRegex(
+                next.buildId
+              )}\\/large-page-data-ssr.json$`,
+              page: '/large-page-data-ssr',
+            },
+            {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/non\\-json/(?<p>[^/]+?)\\.json$`,
+              )}/non\\-json/(?<nxtPp>[^/]+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1507,13 +1528,13 @@ describe('Prerender', () => {
               ),
               page: '/non-json/[p]',
               routeKeys: {
-                p: 'p',
+                nxtPp: 'nxtPp',
               },
             },
             {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/non\\-json\\-blocking/(?<p>[^/]+?)\\.json$`,
+              )}/non\\-json\\-blocking/(?<nxtPp>[^/]+?)\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1521,7 +1542,7 @@ describe('Prerender', () => {
               ),
               page: '/non-json-blocking/[p]',
               routeKeys: {
-                p: 'p',
+                nxtPp: 'nxtPp',
               },
             },
             {
@@ -1541,9 +1562,15 @@ describe('Prerender', () => {
               page: '/something',
             },
             {
+              dataRouteRegex: normalizeRegEx(
+                `^\\/_next\\/data\\/${escapeRegex(next.buildId)}\\/ssr.json$`
+              ),
+              page: '/ssr',
+            },
+            {
               namedDataRouteRegex: `^/_next/data/${escapeRegex(
                 next.buildId
-              )}/user/(?<user>[^/]+?)/profile\\.json$`,
+              )}/user/(?<nxtPuser>[^/]+?)/profile\\.json$`,
               dataRouteRegex: normalizeRegEx(
                 `^\\/_next\\/data\\/${escapeRegex(
                   next.buildId
@@ -1551,7 +1578,7 @@ describe('Prerender', () => {
               ),
               page: '/user/[user]/profile',
               routeKeys: {
-                user: 'user',
+                nxtPuser: 'nxtPuser',
               },
             },
           ])
@@ -1574,7 +1601,7 @@ describe('Prerender', () => {
             }
           })
 
-          expect(manifest.version).toBe(3)
+          expect(manifest.version).toBe(4)
           expect(manifest.routes).toEqual(expectedManifestRoutes())
           expect(manifest.dynamicRoutes).toEqual({
             '/api-docs/[...slug]': {
@@ -1786,7 +1813,17 @@ describe('Prerender', () => {
         })
       }
 
-      it('should revalidate manual revalidate with preview cookie', async () => {
+      it('should not throw error for on-demand revalidate for SSR path', async () => {
+        const res = await fetchViaHTTP(next.url, '/api/manual-revalidate', {
+          pathname: '/ssr',
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ revalidated: false })
+        expect(stripAnsi(next.cliOutput)).not.toContain('hasHeader')
+      })
+
+      it('should revalidate on-demand revalidate with preview cookie', async () => {
         const initialRes = await fetchViaHTTP(next.url, '/preview')
         expect(initialRes.status).toBe(200)
 
@@ -1808,8 +1845,8 @@ describe('Prerender', () => {
         previewRes.headers
           .get('set-cookie')
           .split(',')
-          .forEach((c) => {
-            c = cookie.parse(c)
+          .forEach((s) => {
+            const c = cookie.parse(s)
             const isBypass = c.__prerender_bypass
 
             if (isBypass || c.__next_preview_data) {
@@ -2027,8 +2064,9 @@ describe('Prerender', () => {
               /webpack-runtime\.js/,
               /node_modules\/react\/index\.js/,
               /node_modules\/react\/package\.json/,
-              /node_modules\/react\/cjs\/react\.production\.min\.js/,
-              /node_modules\/next/,
+              isReact18
+                ? /node_modules\/react\/cjs\/react\.production\.min\.js/
+                : /node_modules\/react\/cjs\/react\.production\.js/,
             ],
             notTests: [],
           },
@@ -2039,8 +2077,9 @@ describe('Prerender', () => {
               /chunks\/.*?\.js/,
               /node_modules\/react\/index\.js/,
               /node_modules\/react\/package\.json/,
-              /node_modules\/react\/cjs\/react\.production\.min\.js/,
-              /node_modules\/next/,
+              isReact18
+                ? /node_modules\/react\/cjs\/react\.production\.min\.js/
+                : /node_modules\/react\/cjs\/react\.production\.js/,
               /\/world.txt/,
             ],
             notTests: [
@@ -2055,10 +2094,9 @@ describe('Prerender', () => {
               /chunks\/.*?\.js/,
               /node_modules\/react\/index\.js/,
               /node_modules\/react\/package\.json/,
-              /node_modules\/react\/cjs\/react\.production\.min\.js/,
-              /node_modules\/next/,
-              /next\/router\.js/,
-              /next\/dist\/client\/router\.js/,
+              isReact18
+                ? /node_modules\/react\/cjs\/react\.production\.min\.js/
+                : /node_modules\/react\/cjs\/react\.production\.js/,
               /node_modules\/@firebase\/firestore\/.*?\.js/,
             ],
             notTests: [/\/world.txt/],
@@ -2072,9 +2110,16 @@ describe('Prerender', () => {
           const { version, files } = JSON.parse(contents)
           expect(version).toBe(1)
 
-          expect(
-            check.tests.every((item) => files.some((file) => item.test(file)))
-          ).toBe(true)
+          try {
+            expect(check.tests).toEqual(
+              expect.toSatisfyAll((item) =>
+                files.some((file) => item.test(file))
+              )
+            )
+          } catch (error) {
+            error.message += `\n\nPage: ${check.page}\nFiles:\n${files.join('\n')}`
+            throw error
+          }
 
           if (sep === '/') {
             expect(
@@ -2088,19 +2133,12 @@ describe('Prerender', () => {
     }
 
     if (!isDev) {
-      it('should handle manual revalidate for fallback: blocking', async () => {
-        const beforeRevalidate = Date.now()
+      it('should handle on-demand revalidate for fallback: blocking', async () => {
         const res = await fetchViaHTTP(
           next.url,
           '/blocking-fallback/test-manual-1'
         )
 
-        if (!isDeploy) {
-          await waitForCacheWrite(
-            '/blocking-fallback/test-manual-1',
-            beforeRevalidate
-          )
-        }
         const html = await res.text()
         const $ = cheerio.load(html)
         const initialTime = $('#time').text()
@@ -2110,15 +2148,19 @@ describe('Prerender', () => {
         expect($('p').text()).toMatch(/Post:.*?test-manual-1/)
 
         if (!isDeploy) {
-          const res2 = await fetchViaHTTP(
-            next.url,
-            '/blocking-fallback/test-manual-1'
-          )
-          const html2 = await res2.text()
-          const $2 = cheerio.load(html2)
+          // we use retry here as the cache might still be
+          // writing to disk even after the above request has finished
+          await retry(async () => {
+            const res2 = await fetchViaHTTP(
+              next.url,
+              '/blocking-fallback/test-manual-1'
+            )
+            const html2 = await res2.text()
+            const $2 = cheerio.load(html2)
 
-          expect(res2.headers.get(cacheHeader)).toMatch(/(HIT|STALE)/)
-          expect(initialTime).toBe($2('#time').text())
+            expect(res2.headers.get(cacheHeader)).toMatch(/(HIT|STALE)/)
+            expect(initialTime).toBe($2('#time').text())
+          })
         }
 
         const res3 = await fetchViaHTTP(
@@ -2134,7 +2176,7 @@ describe('Prerender', () => {
         const revalidateData = await res3.json()
         expect(revalidateData.revalidated).toBe(true)
 
-        await check(async () => {
+        await retry(async () => {
           const res4 = await fetchViaHTTP(
             next.url,
             '/blocking-fallback/test-manual-1'
@@ -2143,33 +2185,29 @@ describe('Prerender', () => {
           const $4 = cheerio.load(html4)
           expect($4('#time').text()).not.toBe(initialTime)
           expect(res4.headers.get(cacheHeader)).toMatch(/(HIT|STALE)/)
-          return 'success'
-        }, 'success')
+        })
       })
     }
 
     if (!isDev && !isDeploy) {
       it('should automatically reset cache TTL when an error occurs and build cache was available', async () => {
-        await next.patchFile('error.txt', 'yes')
-        await waitFor(2000)
+        await next.patchFile('error.txt', 'yes', async () => {
+          await waitFor(2000)
 
-        for (let i = 0; i < 5; i++) {
-          const res = await fetchViaHTTP(
-            next.url,
-            '/blocking-fallback/test-errors-1'
-          )
-          expect(res.status).toBe(200)
-        }
-        await next.deleteFile('error.txt')
-        await check(
-          () =>
-            next.cliOutput.match(
+          for (let i = 0; i < 5; i++) {
+            const res = await fetchViaHTTP(
+              next.url,
+              '/blocking-fallback/test-errors-1'
+            )
+            expect(res.status).toBe(200)
+          }
+
+          return retry(async () => {
+            expect(next.cliOutput).toMatch(
               /throwing error for \/blocking-fallback\/test-errors-1/
-            ).length === 1
-              ? 'success'
-              : next.cliOutput,
-          'success'
-        )
+            )
+          })
+        })
       })
 
       it('should automatically reset cache TTL when an error occurs and runtime cache was available', async () => {
@@ -2180,29 +2218,25 @@ describe('Prerender', () => {
 
         expect(res.status).toBe(200)
         await waitFor(2000)
-        await next.patchFile('error.txt', 'yes')
 
-        for (let i = 0; i < 5; i++) {
-          const res = await fetchViaHTTP(
-            next.url,
-            '/blocking-fallback/test-errors-2'
-          )
-          expect(res.status).toBe(200)
-        }
-        await next.deleteFile('error.txt')
+        await next.patchFile('error.txt', 'yes', async () => {
+          for (let i = 0; i < 5; i++) {
+            const res = await fetchViaHTTP(
+              next.url,
+              '/blocking-fallback/test-errors-2'
+            )
+            expect(res.status).toBe(200)
+          }
 
-        await check(
-          () =>
-            next.cliOutput.match(
+          return retry(async () => {
+            expect(next.cliOutput).toMatch(
               /throwing error for \/blocking-fallback\/test-errors-2/
-            ).length === 1
-              ? 'success'
-              : next.cliOutput,
-          'success'
-        )
+            )
+          })
+        })
       })
 
-      it('should not manual revalidate for fallback: blocking with onlyGenerated if not generated', async () => {
+      it('should not on-demand revalidate for fallback: blocking with onlyGenerated if not generated', async () => {
         const res = await fetchViaHTTP(
           next.url,
           '/api/manual-revalidate',
@@ -2229,7 +2263,7 @@ describe('Prerender', () => {
         expect(next.cliOutput).toContain(`getStaticProps test-if-generated-1`)
       })
 
-      it('should manual revalidate for fallback: blocking with onlyGenerated if generated', async () => {
+      it('should on-demand revalidate for fallback: blocking with onlyGenerated if generated', async () => {
         const beforeRevalidate = Date.now()
         const res = await fetchViaHTTP(
           next.url,
@@ -2242,18 +2276,20 @@ describe('Prerender', () => {
         const html = await res.text()
         const $ = cheerio.load(html)
         const initialTime = $('#time').text()
-        expect(res.headers.get('x-nextjs-cache')).toMatch(/MISS/)
         expect($('p').text()).toMatch(/Post:.*?test-if-generated-2/)
+        expect(res.headers.get('x-nextjs-cache')).toMatch(/MISS/)
 
-        const res2 = await fetchViaHTTP(
-          next.url,
-          '/blocking-fallback/test-if-generated-2'
-        )
-        const html2 = await res2.text()
-        const $2 = cheerio.load(html2)
-        expect(res2.headers.get('x-nextjs-cache')).toMatch(/(HIT|STALE)/)
+        await retry(async () => {
+          const res2 = await fetchViaHTTP(
+            next.url,
+            '/blocking-fallback/test-if-generated-2'
+          )
+          const html2 = await res2.text()
+          const $2 = cheerio.load(html2)
 
-        expect(initialTime).toBe($2('#time').text())
+          expect(initialTime).toBe($2('#time').text())
+          expect(res2.headers.get('x-nextjs-cache')).toMatch(/(HIT|STALE)/)
+        })
 
         const res3 = await fetchViaHTTP(
           next.url,
@@ -2269,17 +2305,19 @@ describe('Prerender', () => {
         const revalidateData = await res3.json()
         expect(revalidateData.revalidated).toBe(true)
 
-        const res4 = await fetchViaHTTP(
-          next.url,
-          '/blocking-fallback/test-if-generated-2'
-        )
-        const html4 = await res4.text()
-        const $4 = cheerio.load(html4)
-        expect($4('#time').text()).not.toBe(initialTime)
-        expect(res4.headers.get('x-nextjs-cache')).toMatch(/(HIT|STALE)/)
+        await retry(async () => {
+          const res4 = await fetchViaHTTP(
+            next.url,
+            '/blocking-fallback/test-if-generated-2'
+          )
+          const html4 = await res4.text()
+          const $4 = cheerio.load(html4)
+          expect($4('#time').text()).not.toBe(initialTime)
+          expect(res4.headers.get('x-nextjs-cache')).toMatch(/(HIT|STALE)/)
+        })
       })
 
-      it('should manual revalidate for revalidate: false', async () => {
+      it('should on-demand revalidate for revalidate: false', async () => {
         const html = await renderViaHTTP(
           next.url,
           '/blocking-fallback-once/test-manual-1'
@@ -2318,7 +2356,7 @@ describe('Prerender', () => {
         expect($4('#time').text()).not.toBe(initialTime)
       })
 
-      it('should manual revalidate that returns notFound: true', async () => {
+      it('should on-demand revalidate that returns notFound: true', async () => {
         const res = await fetchViaHTTP(
           next.url,
           '/blocking-fallback-once/404-on-manual-revalidate'
@@ -2359,7 +2397,7 @@ describe('Prerender', () => {
         expect(res3.headers.get('x-nextjs-cache')).toBe('HIT')
       })
 
-      it('should handle manual revalidate for fallback: false', async () => {
+      it('should handle on-demand revalidate for fallback: false', async () => {
         const res = await fetchViaHTTP(
           next.url,
           '/catchall-explicit/test-manual-1'
@@ -2426,6 +2464,11 @@ describe('Prerender', () => {
     it('should not fail to update incremental cache', async () => {
       await waitFor(1000)
       expect(next.cliOutput).not.toContain('Failed to update prerender cache')
+    })
+
+    it('should not have experimental undici warning', async () => {
+      await waitFor(1000)
+      expect(next.cliOutput).not.toContain('option is unnecessary in Node.js')
     })
 
     it('should not have attempted sending invalid payload', async () => {

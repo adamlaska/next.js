@@ -4,7 +4,7 @@ import fs from 'fs-extra'
 import { join } from 'path'
 import webdriver from 'next-webdriver'
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import { check, fetchViaHTTP, waitFor } from 'next-test-utils'
 
 describe('Middleware Runtime trailing slash', () => {
@@ -24,6 +24,62 @@ describe('Middleware Runtime trailing slash', () => {
   })
 
   function runTests() {
+    describe('with .html extension', () => {
+      it('should work when requesting the page directly', async () => {
+        const $ = await next.render$(
+          '/product/shirts_and_tops/mens_ua_playoff_polo_2.0/1327037.html'
+        )
+        expect($('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037.html'
+        )
+      })
+
+      it('should work using browser', async () => {
+        const browser = await next.browser(
+          '/product/shirts_and_tops/mens_ua_playoff_polo_2.0/1327037.html'
+        )
+        expect(await browser.elementByCss('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037.html'
+        )
+      })
+
+      it('should work when navigating', async () => {
+        const browser = await next.browser('/html-links')
+        await browser.elementByCss('#with-html').click()
+        expect(await browser.waitForElementByCss('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037.html'
+        )
+      })
+    })
+
+    describe('without .html extension', () => {
+      it('should work when requesting the page directly', async () => {
+        const $ = await next.render$(
+          '/product/shirts_and_tops/mens_ua_playoff_polo_2.0/1327037'
+        )
+        expect($('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037'
+        )
+      })
+
+      it('should work using browser', async () => {
+        const browser = await next.browser(
+          '/product/shirts_and_tops/mens_ua_playoff_polo_2.0/1327037'
+        )
+        expect(await browser.elementByCss('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037'
+        )
+      })
+
+      it('should work when navigating', async () => {
+        const browser = await next.browser('/html-links')
+        await browser.elementByCss('#without-html').click()
+        expect(await browser.waitForElementByCss('#text').text()).toBe(
+          'Param found: shirts_and_tops, mens_ua_playoff_polo_2.0, 1327037'
+        )
+      })
+    })
+
     if ((global as any).isNextDev) {
       it('refreshes the page when middleware changes ', async () => {
         const browser = await webdriver(next.url, `/about/`)
@@ -53,16 +109,22 @@ describe('Middleware Runtime trailing slash', () => {
         const manifest = await fs.readJSON(
           join(next.testDir, '.next/server/middleware-manifest.json')
         )
-        expect(manifest.middleware).toEqual({
-          '/': {
-            files: ['server/edge-runtime-webpack.js', 'server/middleware.js'],
-            name: 'middleware',
-            env: [],
-            page: '/',
-            matchers: [{ regexp: '^/.*$' }],
-            wasm: [],
-            assets: [],
-          },
+        const middlewareWithoutEnvs = {
+          ...manifest.middleware['/'],
+        }
+        delete middlewareWithoutEnvs.env
+        expect(middlewareWithoutEnvs).toEqual({
+          files: process.env.TURBOPACK
+            ? expect.toBeArray()
+            : expect.arrayContaining([
+                'server/edge-runtime-webpack.js',
+                'server/middleware.js',
+              ]),
+          name: 'middleware',
+          page: '/',
+          matchers: [{ regexp: '^/.*$', originalSource: '/:path*' }],
+          wasm: [],
+          assets: process.env.TURBOPACK ? expect.toBeArray() : [],
         })
       })
 
@@ -72,9 +134,11 @@ describe('Middleware Runtime trailing slash', () => {
         )
         for (const key of Object.keys(manifest.middleware)) {
           const middleware = manifest.middleware[key]
-          expect(middleware.files).toContainEqual(
-            expect.stringContaining('server/edge-runtime-webpack')
-          )
+          if (!process.env.TURBOPACK) {
+            expect(middleware.files).toContainEqual(
+              expect.stringContaining('server/edge-runtime-webpack')
+            )
+          }
           expect(middleware.files).not.toContainEqual(
             expect.stringContaining('static/chunks/')
           )
@@ -120,8 +184,8 @@ describe('Middleware Runtime trailing slash', () => {
       await check(() => browser.elementByCss('body').text(), /\/to-ssg/)
 
       expect(JSON.parse(await browser.elementByCss('#query').text())).toEqual({
-        slug: 'hello',
         from: 'middleware',
+        slug: 'hello',
       })
       expect(
         JSON.parse(await browser.elementByCss('#props').text()).params
@@ -133,7 +197,11 @@ describe('Middleware Runtime trailing slash', () => {
     })
 
     it('should have correct dynamic route params on client-transition to dynamic route', async () => {
-      const browser = await webdriver(next.url, '/')
+      const browser = await webdriver(next.url, '/404')
+      await check(
+        () => browser.eval('next.router.isReady ? "yes" : "no"'),
+        'yes'
+      )
       await browser.eval('window.beforeNav = 1')
       await browser.eval('window.next.router.push("/blog/first")')
       await browser.waitForElementByCss('#blog')
@@ -171,7 +239,11 @@ describe('Middleware Runtime trailing slash', () => {
     })
 
     it('should have correct dynamic route params for middleware rewrite to dynamic route', async () => {
-      const browser = await webdriver(next.url, '/')
+      const browser = await webdriver(next.url, '/404')
+      await check(
+        () => browser.eval('next.router.isReady ? "yes" : "no"'),
+        'yes'
+      )
       await browser.eval('window.beforeNav = 1')
       await browser.eval('window.next.router.push("/rewrite-to-dynamic")')
       await browser.waitForElementByCss('#blog')
@@ -194,7 +266,11 @@ describe('Middleware Runtime trailing slash', () => {
     })
 
     it('should have correct route params for chained rewrite from middleware to config rewrite', async () => {
-      const browser = await webdriver(next.url, '/')
+      const browser = await webdriver(next.url, '/404')
+      await check(
+        () => browser.eval('next.router.isReady ? "yes" : "no"'),
+        'yes'
+      )
       await browser.eval('window.beforeNav = 1')
       await browser.eval(
         'window.next.router.push("/rewrite-to-config-rewrite")'
@@ -220,7 +296,11 @@ describe('Middleware Runtime trailing slash', () => {
     })
 
     it('should have correct route params for rewrite from config dynamic route', async () => {
-      const browser = await webdriver(next.url, '/')
+      const browser = await webdriver(next.url, '/404')
+      await check(
+        () => browser.eval('next.router.isReady ? "yes" : "no"'),
+        'yes'
+      )
       await browser.eval('window.beforeNav = 1')
       await browser.eval('window.next.router.push("/rewrite-3")')
       await browser.waitForElementByCss('#blog')
@@ -241,7 +321,7 @@ describe('Middleware Runtime trailing slash', () => {
     })
 
     it('should have correct route params for rewrite from config non-dynamic route', async () => {
-      const browser = await webdriver(next.url, '/')
+      const browser = await webdriver(next.url, '/404')
       await browser.eval('window.beforeNav = 1')
       await browser.eval('window.next.router.push("/rewrite-1")')
 
@@ -277,7 +357,11 @@ describe('Middleware Runtime trailing slash', () => {
       expect(res.status).toBe(200)
       expect(await res.text()).toContain('Hello World')
 
-      const browser = await webdriver(next.url, `/`)
+      const browser = await webdriver(next.url, `/404`)
+      await check(
+        () => browser.eval('next.router.isReady ? "yes" : "nope"'),
+        'yes'
+      )
       await browser.eval('window.beforeNav = 1')
       await browser.eval(`next.router.push('/rewrite-1')`)
       await check(async () => {
@@ -292,7 +376,7 @@ describe('Middleware Runtime trailing slash', () => {
       expect(res.status).toBe(200)
       expect(await res.text()).toContain('AboutA')
 
-      const browser = await webdriver(next.url, `/`)
+      const browser = await webdriver(next.url, `/404`)
       await browser.eval(`next.router.push('/rewrite-2')`)
       await check(async () => {
         const content = await browser.eval('document.documentElement.innerHTML')
@@ -391,14 +475,14 @@ describe('Middleware Runtime trailing slash', () => {
         requests.push(x.url())
       })
 
-      browser.elementById('deep-link').click()
-      browser.waitForElementByCss('[data-query-hello="goodbye"]')
+      await browser.elementById('deep-link').click()
+      await browser.waitForElementByCss('[data-query-hello="goodbye"]')
       const deepLinkMessage = await getMessageContents()
       expect(deepLinkMessage).not.toEqual(ssrMessage)
 
       // Changing the route with a shallow link should not cause a server request
-      browser.elementById('shallow-link').click()
-      browser.waitForElementByCss('[data-query-hello="world"]')
+      await browser.elementById('shallow-link').click()
+      await browser.waitForElementByCss('[data-query-hello="world"]')
       expect(await getMessageContents()).toEqual(deepLinkMessage)
 
       // Check that no server requests were made to ?hello=world,

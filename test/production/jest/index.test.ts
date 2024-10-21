@@ -1,15 +1,10 @@
-import { createNext } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { createNext, FileRef } from 'e2e-utils'
+import { NextInstance } from 'e2e-utils'
 import { renderViaHTTP } from 'next-test-utils'
+import { join } from 'node:path'
 
 describe('next/jest', () => {
   let next: NextInstance
-
-  if (process.env.NEXT_TEST_REACT_VERSION === '^17') {
-    // react testing library is specific to react version
-    it('should bail on react v17', () => {})
-    return
-  }
 
   beforeAll(async () => {
     next = await createNext({
@@ -27,29 +22,35 @@ describe('next/jest', () => {
           import Image from "next/image";
           import img from "../public/vercel.svg";
           import styles from "../styles/index.module.css";
+          import localFont from "next/font/local";
+          import { Inter } from "next/font/google";
+
+          const inter = Inter({ subsets: ["latin"] });
+          const myFont = localFont({ src: "./my-font.woff2" });
 
           const Comp = dynamic(() => import("../components/comp"), {
             loading: () => <h1>Loading...</h1>,
           });
 
-          export default function Page() { 
+          export default function Page() {
             return <>
               <Comp />
               <Image src={img} alt="logo" placeholder="blur"/>
               <Image src={img} alt="logo 2"/>
               <p className={styles.home}>hello world</p>
+              <p style={{ fontFamily: inter.style.fontFamily }} className={myFont.className}>hello world</p>
             </>
-          } 
+          }
         `,
         'jest.config.js': `
           // jest.config.js
           const nextJest = require('next/jest')
-          
+
           const createJestConfig = nextJest({
             // Provide the path to your Next.js app to load next.config.js and .env files in your test environment
             dir: './',
           })
-          
+
           // Add any custom config to be passed to Jest
           const customJestConfig = {
             // if using TypeScript with a baseUrl set to the root directory then you need the below for alias' to work
@@ -62,7 +63,7 @@ describe('next/jest', () => {
               '^.+\\.(js|jsx|ts|tsx)$': ['babel-jest', { presets: ['next/babel'] }],
             },
           }
-          
+
           // createJestConfig is exported this way to ensure that next/jest can load the Next.js config which is async
           module.exports = createJestConfig(customJestConfig)
         `,
@@ -76,17 +77,18 @@ describe('next/jest', () => {
           
           describe("Home", () => {
             it("renders a heading", () => {
-              act(() => {
-                render(<Home />);
+              const { unmount } = render(<Home />);
           
-                const heading = screen.getByRole("heading", {
-                  name: /Loading/i,
-                });
-          
-                expect(heading).toBeInTheDocument();
+              const heading = screen.getByRole("heading", {
+                name: /Loading/i,
               });
+          
+              expect(heading).toBeInTheDocument();
+          
+              unmount();
             });
           });
+        
         `,
         'lib/hello.mjs': `
           import path from 'path'
@@ -124,21 +126,26 @@ describe('next/jest', () => {
             expect(router.push._isMockFunction).toBeTruthy()
           })
         `,
+        'pages/my-font.woff2': new FileRef(
+          join(__dirname, 'basic', 'my-font.woff2')
+        ),
       },
       dependencies: {
-        jest: '27.4.7',
+        '@next/font': 'canary',
+        jest: '29.7.0',
+        'jest-environment-jsdom': '29.7.0',
         '@testing-library/jest-dom': '5.16.1',
-        '@testing-library/react': '12.1.2',
-        '@testing-library/user-event': '13.5.0',
+        '@testing-library/react': '15.0.2',
+        '@testing-library/user-event': '14.5.2',
       },
       packageJson: {
         scripts: {
           // Runs jest and bails if jest fails
-          build:
-            'next build && yarn jest test/mock.test.js test/dynamic.test.js',
+          build: 'next build && jest test/mock.test.js test/dynamic.test.js',
         },
       },
-      buildCommand: `yarn build`,
+      installCommand: 'pnpm i',
+      buildCommand: `pnpm build`,
     })
   })
   afterAll(() => next.destroy())

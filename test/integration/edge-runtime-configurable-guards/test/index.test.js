@@ -9,6 +9,7 @@ import {
   launchApp,
   nextBuild,
   nextStart,
+  retry,
   waitFor,
 } from 'next-test-utils'
 import { remove } from 'fs-extra'
@@ -44,9 +45,9 @@ describe('Edge runtime configurable guards', () => {
     context.logs = { output: '', stdout: '', stderr: '' }
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     if (context.app) {
-      killApp(context.app)
+      await killApp(context.app)
     }
     context.api.restore()
     context.middleware.restore()
@@ -54,7 +55,7 @@ describe('Edge runtime configurable guards', () => {
   })
 
   describe('Multiple functions with different configurations', () => {
-    beforeEach(() => {
+    beforeEach(async () => {
       context.middleware.write(`
         import { NextResponse } from 'next/server'
 
@@ -72,10 +73,11 @@ describe('Edge runtime configurable guards', () => {
           return Response.json({ result: true })
         }
         export const config = {
-          runtime: 'experimental-edge',
+          runtime: 'edge',
           unstable_allowDynamic: '/lib/**'
         }
       `)
+      await waitFor(500)
     })
 
     it('warns in dev for allowed code', async () => {
@@ -83,35 +85,47 @@ describe('Edge runtime configurable guards', () => {
       const res = await fetchViaHTTP(context.appPort, middlewareUrl)
       await waitFor(500)
       expect(res.status).toBe(200)
-      expect(context.logs.output).toContain(
-        `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
-      )
+      await retry(async () => {
+        expect(context.logs.output).toContain(
+          `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
+        )
+      })
     })
 
     it('warns in dev for unallowed code', async () => {
       context.app = await launchApp(context.appDir, context.appPort, appOption)
       const res = await fetchViaHTTP(context.appPort, routeUrl)
-      await waitFor(500)
       expect(res.status).toBe(200)
-      expect(context.logs.output).toContain(
-        `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
-      )
-    })
-
-    it('fails to build because of unallowed code', async () => {
-      const output = await nextBuild(context.appDir, undefined, {
-        stdout: true,
-        stderr: true,
-        env: { NEXT_TELEMETRY_DEBUG: 1 },
+      await retry(async () => {
+        expect(context.logs.output).toContain(
+          `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
+        )
       })
-      expect(output.stderr).toContain(`Build failed`)
-      expect(output.stderr).toContain(`./pages/api/route.js`)
-      expect(output.stderr).toContain(
-        `Dynamic Code Evaluation (e. g. 'eval', 'new Function', 'WebAssembly.compile') not allowed in Edge Runtime`
-      )
-      expect(output.stderr).toContain(`Used by default`)
-      expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
     })
+    ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+      'production mode',
+      () => {
+        it('fails to build because of unallowed code', async () => {
+          const output = await nextBuild(context.appDir, undefined, {
+            stdout: true,
+            stderr: true,
+            env: process.env.TURBOPACK ? {} : { NEXT_TELEMETRY_DEBUG: 1 },
+          })
+
+          expect(output.code).toBe(1)
+          if (!process.env.TURBOPACK) {
+            expect(output.stderr).toContain(`./pages/api/route.js`)
+          }
+          expect(output.stderr).toContain(
+            `Dynamic Code Evaluation (e. g. 'eval', 'new Function', 'WebAssembly.compile') not allowed in Edge Runtime`
+          )
+          if (!process.env.TURBOPACK) {
+            expect(output.stderr).toContain(`Used by default`)
+            expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
+          }
+        })
+      }
+    )
   })
 
   describe.each([
@@ -125,7 +139,7 @@ describe('Edge runtime configurable guards', () => {
             return Response.json({ result: true })
           }
           export const config = {
-            runtime: 'experimental-edge',
+            runtime: 'edge',
             unstable_allowDynamic: '**'
           }
         `)
@@ -159,7 +173,7 @@ describe('Edge runtime configurable guards', () => {
             return Response.json({ result: true })
           }
           export const config = {
-            runtime: 'experimental-edge',
+            runtime: 'edge',
             unstable_allowDynamic: '/lib/**'
           }
         `)
@@ -221,7 +235,7 @@ describe('Edge runtime configurable guards', () => {
             return Response.json({ result: true })
           }
           export const config = {
-            runtime: 'experimental-edge',
+            runtime: 'edge',
             unstable_allowDynamic: '**'
           }
         `)
@@ -257,7 +271,7 @@ describe('Edge runtime configurable guards', () => {
             return Response.json({ result: true })
           }
           export const config = {
-            runtime: 'experimental-edge',
+            runtime: 'edge',
             unstable_allowDynamic: '/lib/**'
           }
         `)
@@ -297,23 +311,43 @@ describe('Edge runtime configurable guards', () => {
     },
   ])('$title with allowed, unused dynamic code', ({ init, url }) => {
     beforeEach(() => init())
-
-    it('build and does not warn at runtime', async () => {
-      const output = await nextBuild(context.appDir, undefined, {
-        stdout: true,
-        stderr: true,
-        env: { NEXT_TELEMETRY_DEBUG: 1 },
-      })
-      expect(output.stderr).not.toContain(`Build failed`)
-      expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
-      context.app = await nextStart(context.appDir, context.appPort, appOption)
-      const res = await fetchViaHTTP(context.appPort, url)
-      expect(res.status).toBe(200)
-      expect(context.logs.output).not.toContain(`warn`)
-      expect(context.logs.output).not.toContain(
-        `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
-      )
-    })
+    ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+      'production mode',
+      () => {
+        // This checks the unstable_allowDynamic configuration which is not supported in Turbopack.
+        ;(process.env.TURBOPACK ? it.skip : it)(
+          'build and does not warn at runtime',
+          async () => {
+            const output = await nextBuild(context.appDir, undefined, {
+              stdout: true,
+              stderr: true,
+              env: process.env.TURBOPACK ? {} : { NEXT_TELEMETRY_DEBUG: 1 },
+            })
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(output.stderr).not.toContain(`Build failed`)
+            if (!process.env.TURBOPACK) {
+              // eslint-disable-next-line jest/no-standalone-expect
+              expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
+            }
+            context.appPort = await findPort()
+            context.app = await nextStart(
+              context.appDir,
+              context.appPort,
+              appOption
+            )
+            const res = await fetchViaHTTP(context.appPort, url)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(res.status).toBe(200)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(context.logs.output).not.toContain(`warn`)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(context.logs.output).not.toContain(
+              `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
+            )
+          }
+        )
+      }
+    )
   })
 
   describe.each([
@@ -328,7 +362,7 @@ describe('Edge runtime configurable guards', () => {
             return Response.json({ result: true })
           }
           export const config = {
-            runtime: 'experimental-edge',
+            runtime: 'edge',
             unstable_allowDynamic: '/pages/**'
           }
         `)
@@ -373,18 +407,97 @@ describe('Edge runtime configurable guards', () => {
         `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
       )
     })
+    ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+      'production mode',
+      () => {
+        it('fails to build because of dynamic code evaluation', async () => {
+          const output = await nextBuild(context.appDir, undefined, {
+            stdout: true,
+            stderr: true,
+            env: process.env.TURBOPACK ? {} : { NEXT_TELEMETRY_DEBUG: 1 },
+          })
+          expect(output.stderr).toContain(
+            `Dynamic Code Evaluation (e. g. 'eval', 'new Function', 'WebAssembly.compile') not allowed in Edge Runtime`
+          )
+          if (!process.env.TURBOPACK) {
+            expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
+          }
+        })
+      }
+    )
+  })
 
-    it('fails to build because of dynamic code evaluation', async () => {
-      const output = await nextBuild(context.appDir, undefined, {
-        stdout: true,
-        stderr: true,
-        env: { NEXT_TELEMETRY_DEBUG: 1 },
-      })
-      expect(output.stderr).toContain(`Build failed`)
-      expect(output.stderr).toContain(
-        `Dynamic Code Evaluation (e. g. 'eval', 'new Function', 'WebAssembly.compile') not allowed in Edge Runtime`
+  describe.each([
+    {
+      title: 'Edge API',
+      url: routeUrl,
+      init() {
+        context.api.write(`
+          export default async function handler(request) {
+            return Response.json({ result: (() => {}) instanceof Function })
+          }
+          export const config = { runtime: 'edge' }
+        `)
+      },
+    },
+    {
+      title: 'Middleware',
+      url: middlewareUrl,
+      init() {
+        context.middleware.write(`
+          import { NextResponse } from 'next/server'
+          import { returnTrue } from './lib'
+          export default async function () {
+            (() => {}) instanceof Function
+            return NextResponse.next()
+          }
+        `)
+      },
+    },
+  ])('$title with use of Function as a type', ({ init, url }) => {
+    beforeEach(() => init())
+
+    it('does not warn in dev at runtime', async () => {
+      context.app = await launchApp(context.appDir, context.appPort, appOption)
+      const res = await fetchViaHTTP(context.appPort, url)
+      await waitFor(500)
+      expect(res.status).toBe(200)
+      expect(context.logs.output).not.toContain(
+        `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
       )
-      expect(output.stderr).toContain(TELEMETRY_EVENT_NAME)
     })
+    ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+      'production mode',
+      () => {
+        // This checks the unstable_allowDynamic configuration which is not supported in Turbopack.
+        // eslint-disable-next-line jest/no-identical-title
+        ;(process.env.TURBOPACK ? it.skip : it)(
+          'build and does not warn at runtime',
+          async () => {
+            const output = await nextBuild(context.appDir, undefined, {
+              stdout: true,
+              stderr: true,
+            })
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(output.stderr).not.toContain(`Build failed`)
+            context.appPort = await findPort()
+            context.app = await nextStart(
+              context.appDir,
+              context.appPort,
+              appOption
+            )
+            const res = await fetchViaHTTP(context.appPort, url)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(res.status).toBe(200)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(context.logs.output).not.toContain(`warn`)
+            // eslint-disable-next-line jest/no-standalone-expect
+            expect(context.logs.output).not.toContain(
+              `Dynamic Code Evaluation (e. g. 'eval', 'new Function') not allowed in Edge Runtime`
+            )
+          }
+        )
+      }
+    )
   })
 })

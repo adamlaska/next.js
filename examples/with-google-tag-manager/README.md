@@ -1,12 +1,12 @@
 ## Example app using Google Tag Manager
 
-This example shows how to use Next.js along with Google Tag Manager. [`pages/_document.js`](pages/_document.js) is used to inject [base code](https://developers.google.com/tag-manager/quickstart). [`pages/_app.js`](pages/_app.js) is used to track route changes and send page views to Google Tag Manager.
+This example shows how to include Google Tag Manager in a Next.js application using `@next/third-parties`. The GTM container is instantiated in `layout.js` and the `sendGTMEvent` function is fired in the `EventButton` client component.
 
 ## Deploy your own
 
 Deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example):
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/with-google-tag-manager&project-name=with-google-tag-manager&repository-name=with-google-tag-manager)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/with-google-tag-manager&project-name=with-google-tag-manager&repository-name=with-google-tag-manager)
 
 ## How to use
 

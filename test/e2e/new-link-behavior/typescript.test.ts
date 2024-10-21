@@ -1,5 +1,5 @@
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import { renderViaHTTP } from 'next-test-utils'
 import cheerio from 'cheerio'
 import path from 'path'
@@ -16,11 +16,6 @@ describe('New Link Behavior', () => {
         pages: new FileRef(path.join(appDir, 'pages')),
         'tsconfig.json': new FileRef(path.join(appDir, 'tsconfig.json')),
         'next.config.js': new FileRef(path.join(appDir, 'next.config.js')),
-      },
-      dependencies: {
-        typescript: '*',
-        '@types/react': '*',
-        '@types/node': '*',
       },
     })
   })

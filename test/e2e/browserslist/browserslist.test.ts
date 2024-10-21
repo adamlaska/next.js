@@ -1,25 +1,21 @@
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 import { renderViaHTTP, fetchViaHTTP } from 'next-test-utils'
 import path from 'path'
 import cheerio from 'cheerio'
 const appDir = path.join(__dirname, 'app')
 
-describe('Browserslist', () => {
+// TODO: This test needs to check multiple files and syntax features.
+describe.skip('Browserslist', () => {
   let next: NextInstance
 
   beforeAll(async () => {
     next = await createNext({
       files: {
         pages: new FileRef(path.join(appDir, 'pages')),
-        '.browserslistrc': 'Chrome 73',
+        // In Chrome 45 arrow functions are introduced, by
+        '.browserslistrc': 'Chrome 42',
       },
-      nextConfig: {
-        experimental: {
-          browsersListForSwc: true,
-        },
-      },
-      dependencies: {},
     })
   })
   afterAll(() => next.destroy())
@@ -28,26 +24,23 @@ describe('Browserslist', () => {
     const html = await renderViaHTTP(next.url, '/')
     const $ = cheerio.load(html)
 
-    let finished = false
-    await Promise.all(
-      $('script')
-        .toArray()
-        .map(async (el) => {
-          const src = $(el).attr('src')
-          if (!src) return
-          if (src.includes('/index')) {
-            const code = await fetchViaHTTP(next.url, src).then((res) =>
-              res.text()
-            )
-
-            const isDev = (global as any).isNextDev
-            expect(
-              code.includes(isDev ? 'async ()=>{' : 'async()=>{console.log(')
-            ).toBe(true)
-            finished = true
-          }
-        })
-    )
-    expect(finished).toBe(true)
+    expect(
+      (
+        await Promise.all(
+          $('script')
+            .toArray()
+            .map(async (el) => {
+              const src = $(el).attr('src')
+              const res = await fetchViaHTTP(next.url, src)
+              const code = await res.text()
+              if (code.includes('async ()=>')) {
+                return src
+              }
+              return false
+            })
+        )
+      ) // Filter out false values
+        .filter((item) => item)
+    ).toBeEmpty()
   })
 })

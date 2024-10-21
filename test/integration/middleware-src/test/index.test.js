@@ -1,19 +1,20 @@
 /* eslint-env jest */
 
-import { promises as fs } from 'fs'
+import fs from 'fs-extra'
 import { join } from 'path'
 import {
   fetchViaHTTP,
+  File,
   findPort,
   launchApp,
   killApp,
   nextBuild,
-  nextStart,
 } from 'next-test-utils'
 
 let app
 let appPort
 const appDir = join(__dirname, '../')
+const nextConfig = new File(join(appDir, 'next.config.js'))
 const srcHeader = 'X-From-Src-Middleware'
 const rootHeader = 'X-From-Root-Middleware'
 const rootMiddlewareJSFile = join(appDir, 'middleware.js')
@@ -38,7 +39,7 @@ function runDoubleMiddlewareTests() {
 }
 
 async function writeRootMiddleware() {
-  await fs.cp(join(appDir, 'src/pages'), join(appDir, 'pages'), {
+  await fs.copy(join(appDir, 'src/pages'), join(appDir, 'pages'), {
     force: true,
     recursive: true,
   })
@@ -67,9 +68,9 @@ return response
 }
 
 async function removeRootMiddleware() {
-  await fs.rm(rootMiddlewareJSFile, { force: true })
-  await fs.rm(rootMiddlewareTSFile, { force: true })
-  await fs.rm(join(appDir, 'pages'), { force: true, recursive: true })
+  await fs.remove(rootMiddlewareJSFile, { force: true })
+  await fs.remove(rootMiddlewareTSFile, { force: true })
+  await fs.remove(join(appDir, 'pages'), { force: true, recursive: true })
 }
 
 describe.each([
@@ -88,25 +89,42 @@ describe.each([
 ])('$title', ({ setup, teardown, runTest }) => {
   beforeAll(() => setup())
   afterAll(() => teardown())
+  ;(process.env.TURBOPACK_BUILD ? describe.skip : describe)(
+    'development mode',
+    () => {
+      beforeAll(async () => {
+        appPort = await findPort()
+        app = await launchApp(appDir, appPort)
+      })
+      afterAll(() => killApp(app))
 
-  describe('dev mode', () => {
-    beforeAll(async () => {
-      appPort = await findPort()
-      app = await launchApp(appDir, appPort)
-    })
-    afterAll(() => killApp(app))
+      runTest()
+    }
+  )
+  ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+    'production mode',
+    () => {
+      let exportOutput = ''
 
-    runTest()
-  })
+      beforeAll(async () => {
+        nextConfig.write(`module.exports = { output: 'export' }`)
+        const result = await nextBuild(appDir, [], {
+          stderr: true,
+          stdout: true,
+        })
 
-  describe('production mode', () => {
-    beforeAll(async () => {
-      await nextBuild(appDir)
-      appPort = await findPort()
-      app = await nextStart(appDir, appPort)
-    })
-    afterAll(() => killApp(app))
+        const outdir = join(__dirname, '..', 'out')
+        await fs.remove(outdir).catch(() => {})
 
-    runTest()
-  })
+        exportOutput = result.stderr + result.stdout
+      })
+      afterAll(() => nextConfig.delete())
+
+      it('should warn about middleware on export', async () => {
+        expect(exportOutput).toContain(
+          'Statically exporting a Next.js application via `next export` disables API routes and middleware.'
+        )
+      })
+    }
+  )
 })

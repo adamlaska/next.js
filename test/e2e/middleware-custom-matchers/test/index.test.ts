@@ -4,7 +4,7 @@ import { join } from 'path'
 import webdriver from 'next-webdriver'
 import { fetchViaHTTP } from 'next-test-utils'
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 
 const itif = (condition: boolean) => (condition ? it : it.skip)
 
@@ -21,6 +21,38 @@ describe('Middleware custom matchers', () => {
   afterAll(() => next.destroy())
 
   const runTests = () => {
+    it('should match missing header correctly', async () => {
+      const res = await fetchViaHTTP(next.url, '/missing-match-1')
+      expect(res.headers.get('x-from-middleware')).toBeDefined()
+
+      const res2 = await fetchViaHTTP(next.url, '/missing-match-1', undefined, {
+        headers: {
+          hello: 'world',
+        },
+      })
+      expect(res2.headers.get('x-from-middleware')).toBeFalsy()
+
+      const res3 = await fetchViaHTTP(next.url, '/')
+      expect(res3.headers.get('x-from-middleware')).toBeDefined()
+
+      const res4 = await fetchViaHTTP(next.url, '/', undefined, {
+        headers: {
+          purpose: 'prefetch',
+        },
+      })
+      expect(res4.headers.get('x-from-middleware')).toBeFalsy()
+    })
+
+    it('should match missing query correctly', async () => {
+      const res = await fetchViaHTTP(next.url, '/missing-match-2')
+      expect(res.headers.get('x-from-middleware')).toBeDefined()
+
+      const res2 = await fetchViaHTTP(next.url, '/missing-match-2', {
+        test: 'value',
+      })
+      expect(res2.headers.get('x-from-middleware')).toBeFalsy()
+    })
+
     it('should match source path', async () => {
       const res = await fetchViaHTTP(next.url, '/source-match')
       expect(res.status).toBe(200)

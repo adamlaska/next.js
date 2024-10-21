@@ -1,6 +1,6 @@
-import Link from 'next/link'
+import Link from "next/link";
 
-import PostPreviewCondensed from './post-preview-condensed'
+import PostPreviewCondensed from "./post-preview-condensed";
 
 export default function Blog({ posts }) {
   return (
@@ -15,8 +15,8 @@ export default function Blog({ posts }) {
                 simple to launch a new company blog.
               </p>
               <p>
-                <Link href={`/blog`}>
-                  <a className="main-btn btn-hover mt-5">View All Blog Posts</a>
+                <Link href={`/blog`} className="main-btn btn-hover mt-5">
+                  View All Blog Posts
                 </Link>
               </p>
             </div>
@@ -38,5 +38,5 @@ export default function Blog({ posts }) {
         </div>
       </div>
     </section>
-  )
+  );
 }

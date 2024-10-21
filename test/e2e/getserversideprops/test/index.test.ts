@@ -5,6 +5,7 @@ import { createNext, FileRef } from 'e2e-utils'
 import escapeRegex from 'escape-string-regexp'
 import {
   check,
+  retry,
   fetchViaHTTP,
   getBrowserBodyText,
   getRedboxHeader,
@@ -14,7 +15,7 @@ import {
 } from 'next-test-utils'
 import { join } from 'path'
 import webdriver from 'next-webdriver'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 
 const appDir = join(__dirname, '../app')
 
@@ -43,19 +44,19 @@ const expectedManifestRoutes = () => [
   {
     namedDataRouteRegex: `^/_next/data/${escapeRegex(
       buildId
-    )}/blog/(?<post>[^/]+?)\\.json$`,
+    )}/blog/(?<nxtPpost>[^/]+?)\\.json$`,
     dataRouteRegex: normalizeRegEx(
       `^\\/_next\\/data\\/${escapeRegex(buildId)}\\/blog\\/([^\\/]+?)\\.json$`
     ),
     page: '/blog/[post]',
     routeKeys: {
-      post: 'post',
+      nxtPpost: 'nxtPpost',
     },
   },
   {
     namedDataRouteRegex: `^/_next/data/${escapeRegex(
       buildId
-    )}/blog/(?<post>[^/]+?)/(?<comment>[^/]+?)\\.json$`,
+    )}/blog/(?<nxtPpost>[^/]+?)/(?<nxtPcomment>[^/]+?)\\.json$`,
     dataRouteRegex: normalizeRegEx(
       `^\\/_next\\/data\\/${escapeRegex(
         buildId
@@ -63,20 +64,20 @@ const expectedManifestRoutes = () => [
     ),
     page: '/blog/[post]/[comment]',
     routeKeys: {
-      post: 'post',
-      comment: 'comment',
+      nxtPpost: 'nxtPpost',
+      nxtPcomment: 'nxtPcomment',
     },
   },
   {
     namedDataRouteRegex: `^/_next/data/${escapeRegex(
       buildId
-    )}/catchall/(?<path>.+?)\\.json$`,
+    )}/catchall/(?<nxtPpath>.+?)\\.json$`,
     dataRouteRegex: normalizeRegEx(
       `^\\/_next\\/data\\/${escapeRegex(buildId)}\\/catchall\\/(.+?)\\.json$`
     ),
     page: '/catchall/[...path]',
     routeKeys: {
-      path: 'path',
+      nxtPpath: 'nxtPpath',
     },
   },
   {
@@ -127,10 +128,10 @@ const expectedManifestRoutes = () => [
     )}\\/not\\-found\\/([^\\/]+?)\\.json$`,
     namedDataRouteRegex: `^/_next/data/${escapeRegex(
       buildId
-    )}/not\\-found/(?<slug>[^/]+?)\\.json$`,
+    )}/not\\-found/(?<nxtPslug>[^/]+?)\\.json$`,
     page: '/not-found/[slug]',
     routeKeys: {
-      slug: 'slug',
+      nxtPslug: 'nxtPslug',
     },
   },
   {
@@ -182,7 +183,7 @@ const expectedManifestRoutes = () => [
   {
     namedDataRouteRegex: `^/_next/data/${escapeRegex(
       buildId
-    )}/user/(?<user>[^/]+?)/profile\\.json$`,
+    )}/user/(?<nxtPuser>[^/]+?)/profile\\.json$`,
     dataRouteRegex: normalizeRegEx(
       `^\\/_next\\/data\\/${escapeRegex(
         buildId
@@ -190,7 +191,7 @@ const expectedManifestRoutes = () => [
     ),
     page: '/user/[user]/profile',
     routeKeys: {
-      user: 'user',
+      nxtPuser: 'nxtPuser',
     },
   },
 ]
@@ -669,6 +670,21 @@ const runTests = (isDev = false, isDeploy = false) => {
     expect(curRandom).toBe(initialRandom + '')
   })
 
+  it('should not trigger an error when a data request is cancelled due to another navigation', async () => {
+    const browser = await webdriver(next.url, ' /')
+
+    await browser.elementByCss("[href='/redirect-page']").click()
+
+    // redirect-page will redirect to /normal
+    await retry(async () => {
+      expect(await getBrowserBodyText(browser)).toInclude('a normal page')
+    })
+
+    // there should not be any console errors
+    const logs = await browser.log()
+    expect(logs.filter((log) => log.source === 'error').length).toBe(0)
+  })
+
   it('should dedupe server data requests', async () => {
     const browser = await webdriver(next.url, '/')
     await waitFor(2000)
@@ -851,6 +867,7 @@ describe('getServerSideProps', () => {
     next = await createNext({
       files: {
         pages: new FileRef(join(appDir, 'pages')),
+        public: new FileRef(join(appDir, 'public')),
         'world.txt': new FileRef(join(appDir, 'world.txt')),
         'next.config.js': new FileRef(join(appDir, 'next.config.js')),
       },

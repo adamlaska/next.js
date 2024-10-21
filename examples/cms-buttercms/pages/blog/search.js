@@ -1,12 +1,12 @@
-import Link from 'next/link'
+import Link from "next/link";
 
-import camelcaseKeys from 'camelcase-keys'
+import camelcaseKeys from "camelcase-keys";
 
-import PostsList from '@/components/blog/posts-list'
+import PostsList from "@/components/blog/posts-list";
 
-import { getCategories, searchPosts } from '@/lib/api'
-import CategoriesWidget from '@/components/blog/categories-widget'
-import SearchWidget from '@/components/blog/search-widget'
+import { getCategories, searchPosts } from "@/lib/api";
+import CategoriesWidget from "@/components/blog/categories-widget";
+import SearchWidget from "@/components/blog/search-widget";
 
 export default function Search({ posts, categories, query }) {
   return (
@@ -19,14 +19,10 @@ export default function Search({ posts, categories, query }) {
                 <h2>Search Results</h2>
                 <ul className="breadcrumb-nav">
                   <li>
-                    <Link href="/">
-                      <a>Home</a>
-                    </Link>
+                    <Link href="/">Home</Link>
                   </li>
                   <li>
-                    <Link href="/blog">
-                      <a>Blog</a>
-                    </Link>
+                    <Link href="/blog">Blog</Link>
                   </li>
                   <li>Search: &#34;{query}&#34;</li>
                 </ul>
@@ -48,14 +44,14 @@ export default function Search({ posts, categories, query }) {
         </div>
       </section>
     </>
-  )
+  );
 }
 
 export async function getServerSideProps({ query: { query } }) {
-  const blogPosts = await searchPosts({ query })
-  const categories = await getCategories()
+  const blogPosts = await searchPosts({ query });
+  const categories = await getCategories();
 
   return {
     props: { posts: camelcaseKeys(blogPosts), categories, query },
-  }
+  };
 }

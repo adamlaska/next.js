@@ -1,18 +1,16 @@
 # Server-Side Rendering Caching Headers
 
-This example uses [`stale-while-revalidate`](https://web.dev/stale-while-revalidate/) [cache-control headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) in combination with `getServerSideProps` for server-rendering.
+By default, Next.js will cache as much as possible to improve performance and reduce cost. This means routes are statically rendered and data requests are cached unless you opt out.
 
-`pages/index.js` uses `getServerSideProps` to forward the request header to the React component, as well as setting a response header. This `cache-control` header uses `stale-while-revalidate` to cache the server response.
+This example uses the [`revalidate`](https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config#revalidate) route segment config option to override the route segment defaults.
 
-`pages/index.js` is considered fresh for ten seconds (`s-maxage=10`). If a request is repeated within the next 10 seconds, the previously cached value will still be fresh. If the request is repeated before 59 seconds, the cached value will be stale but still render (`stale-while-revalidate=59`).
-
-In the background, a revalidation request will be made to populate the cache with a fresh value. If you refresh the page, you will see the new value shown.
+Calling the Index Page (`/`) within the specified timeframe (e.g., 10 seconds) will return the cached Page ([Full Route Cache](https://nextjs.org/docs/app/building-your-application/caching#full-route-cache) in this example).
 
 ## Deploy your own
 
 Deploy the example using [Vercel](https://vercel.com?utm_source=github&utm_medium=readme&utm_campaign=next-example) or preview live with [StackBlitz](https://stackblitz.com/github/vercel/next.js/tree/canary/examples/ssr-caching)
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/git/external?repository-url=https://github.com/vercel/next.js/tree/canary/examples/ssr-caching&project-name=ssr-caching&repository-name=ssr-caching)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/vercel/next.js/tree/canary/examples/ssr-caching&project-name=ssr-caching&repository-name=ssr-caching)
 
 ## How to use
 

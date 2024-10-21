@@ -4,7 +4,7 @@ import cheerio from 'cheerio'
 import webdriver from 'next-webdriver'
 import { fetchViaHTTP } from 'next-test-utils'
 import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { NextInstance } from 'e2e-utils'
 
 describe('Middleware base tests', () => {
   let next: NextInstance
@@ -34,5 +34,15 @@ describe('Middleware base tests', () => {
     const html = await res.text()
     const $ = cheerio.load(html)
     expect($('.title').text()).toBe('About Page')
+  })
+  it('router.query must exist when Link clicked page routing', async () => {
+    const browser = await webdriver(next.url, '/root')
+    try {
+      await browser.elementById('go-to-hello-world-anchor').click()
+      const routeName = await browser.elementById('route-name').text()
+      expect(routeName).toMatch('hello-world')
+    } finally {
+      await browser.close()
+    }
   })
 })

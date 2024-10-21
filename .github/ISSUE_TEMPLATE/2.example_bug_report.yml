@@ -1,17 +1,17 @@
-name: Example Bug Report
-description: Create a bug report for one of the Next.js examples
-labels: 'type: example,template: bug'
+name: Report an issue with an example
+description: Report an issue with one of our Next.js examples.
+labels: ['examples']
 body:
   - type: markdown
     attributes:
-      value: Thanks for taking the time to file a bug report for [one of the examples](https://github.com/vercel/next.js/tree/canary/examples)! Please fill out this form as completely as possible.
-  - type: markdown
-    attributes:
-      value: If you leave out sections there is a high likelihood it will be moved to the GitHub Discussions ["Help" section](https://github.com/vercel/next.js/discussions/categories/help).
+      value: |
+        *Note:* If you leave out sections, the issue might be moved to the ["Help"](https://github.com/vercel/next.js/discussions/categories/help) section.
+
+        Thanks for taking the time to file a bug report for [one of the examples](https://github.com/vercel/next.js/tree/canary/examples)! Please fill out this form as completely as possible.
   - type: checkboxes
     attributes:
       label: Verify canary release
-      description: '`next@canary` is the canary version of Next.js that ships daily. It includes all features and fixes that have not been released to the stable version yet. Think of canary as a public beta. Some issues may already be fixed in the canary version, so please verify that your issue reproduces before opening a new issue.'
+      description: 'Please run `npm install next@canary` to try the canary version of Next.js that ships daily. It includes all features and fixes that have not been released to the stable version yet. Some issues may already be fixed in the canary version, so please verify that your issue reproduces before opening a new issue.'
       options:
         - label: I verified that the issue exists in the latest Next.js canary release
           required: true
@@ -19,6 +19,7 @@ body:
     attributes:
       label: Provide environment information
       description: Please run `next info` in the root directory of your project and paste the results. You might need to use `npx --no-install next info` if next is not in the current PATH.
+      render: bash
     validations:
       required: true
   - type: input
@@ -34,7 +35,7 @@ body:
   - type: input
     attributes:
       label: How are you deploying your application? (if relevant)
-      description: 'For example: next start, next export, Vercel, Other platform'
+      description: 'For example: next start, Vercel, Other platform'
   - type: textarea
     attributes:
       label: Describe the Bug

@@ -29,7 +29,9 @@ function runTests() {
     const text = await browser.elementByCss('#first-render').text()
 
     // Failure case is 'Index<!-- -->3<!-- --><!-- -->'
-    expect(text).toBe('Index<!-- -->1<!-- -->2<!-- -->3<!-- -->4<!-- -->4')
+    expect(text).toMatch(
+      /^Index<!--\/?(\$|\s)-->1(<!--\/?(\$|\s)-->)+2(<!--\/?(\$|\s)-->)+3(<!--\/?(\$|\s)-->)+4(<!--\/?(\$|\s)-->)+4$/
+    )
     expect(await browser.eval('window.caughtErrors')).toBe('')
 
     // should not print "invalid-dynamic-suspense" warning in browser's console
@@ -41,31 +43,36 @@ function runTests() {
 }
 
 describe('next/dynamic', () => {
-  describe('dev mode', () => {
-    beforeAll(async () => {
-      appPort = await findPort()
-      app = await launchApp(appDir, appPort)
-    })
-    afterAll(() => killApp(app))
-
-    runTests(true)
-  })
-
-  describe('production mode', () => {
-    beforeAll(async () => {
-      await runNextCommand(['build', appDir])
-
-      app = nextServer({
-        dir: appDir,
-        dev: false,
-        quiet: true,
+  ;(process.env.TURBOPACK_BUILD ? describe.skip : describe)(
+    'development mode',
+    () => {
+      beforeAll(async () => {
+        appPort = await findPort()
+        app = await launchApp(appDir, appPort)
       })
+      afterAll(() => killApp(app))
 
-      server = await startApp(app)
-      appPort = server.address().port
-    })
-    afterAll(() => stopApp(server))
+      runTests(true)
+    }
+  )
+  ;(process.env.TURBOPACK_DEV ? describe.skip : describe)(
+    'production mode',
+    () => {
+      beforeAll(async () => {
+        await runNextCommand(['build', appDir])
 
-    runTests()
-  })
+        app = nextServer({
+          dir: appDir,
+          dev: false,
+          quiet: true,
+        })
+
+        server = await startApp(app)
+        appPort = server.address().port
+      })
+      afterAll(() => stopApp(server))
+
+      runTests()
+    }
+  )
 })

@@ -1,7 +1,8 @@
 import { join } from 'path'
-import { createNext, FileRef } from 'e2e-utils'
-import { NextInstance } from 'test/lib/next-modes/base'
+import { createNext, nextTestSetup } from 'e2e-utils'
+import { NextInstance } from 'e2e-utils'
 import {
+  check,
   fetchViaHTTP,
   findPort,
   initNextServerScript,
@@ -9,27 +10,12 @@ import {
   renderViaHTTP,
 } from 'next-test-utils'
 
-const react18Deps = {
-  react: '^18.0.0',
-  'react-dom': '^18.0.0',
-}
-
 const isNextProd = !(global as any).isNextDev && !(global as any).isNextDeploy
 
-describe('react 18 streaming SSR with custom next configs', () => {
-  let next: NextInstance
-
-  beforeAll(async () => {
-    next = await createNext({
-      files: {
-        pages: new FileRef(join(__dirname, 'streaming-ssr/pages')),
-      },
-      nextConfig: require(join(__dirname, 'streaming-ssr/next.config.js')),
-      dependencies: react18Deps,
-      installCommand: 'npm install',
-    })
+describe('streaming SSR with custom next configs', () => {
+  const { next } = nextTestSetup({
+    files: join(__dirname, 'streaming-ssr'),
   })
-  afterAll(() => next.destroy())
 
   it('should match more specific route along with dynamic routes', async () => {
     const res1 = await fetchViaHTTP(next.url, '/api/user/login')
@@ -40,7 +26,7 @@ describe('react 18 streaming SSR with custom next configs', () => {
 
   it('should render styled-jsx styles in streaming', async () => {
     const html = await renderViaHTTP(next.url, '/')
-    expect(html).toContain('color:blue')
+    expect(html).toMatch(/color:(?:blue|#00f)/)
   })
 
   it('should redirect paths without trailing-slash and render when slash is appended', async () => {
@@ -60,25 +46,52 @@ describe('react 18 streaming SSR with custom next configs', () => {
     expect(html).toContain('home')
   })
 
+  it('should render next/router correctly in edge runtime', async () => {
+    const html = await renderViaHTTP(next.url, '/router')
+    expect(html).toContain('link')
+  })
+
   it('should render multi-byte characters correctly in streaming', async () => {
     const html = await renderViaHTTP(next.url, '/multi-byte')
     expect(html).toContain('マルチバイト'.repeat(28))
   })
+
+  if ((global as any).isNextDev) {
+    it('should work with custom document', async () => {
+      await next.patchFile(
+        'pages/_document.js',
+        `
+      import { Html, Head, Main, NextScript } from 'next/document'
+
+      export default function Document() {
+        return (
+          <Html>
+            <Head />
+            <body>
+              <Main />
+              <NextScript />
+            </body>
+          </Html>
+        )
+      }
+    `
+      )
+      await check(async () => {
+        return await renderViaHTTP(next.url, '/')
+      }, /index/)
+      await next.deleteFile('pages/_document.js')
+    })
+  }
 })
 
 if (isNextProd) {
-  describe('react 18 streaming SSR with custom server', () => {
+  describe('streaming SSR with custom server', () => {
     let next
     let server
     let appPort
     beforeAll(async () => {
       next = await createNext({
-        files: {
-          pages: new FileRef(join(__dirname, 'custom-server/pages')),
-          'server.js': new FileRef(join(__dirname, 'custom-server/server.js')),
-        },
-        nextConfig: require(join(__dirname, 'custom-server/next.config.js')),
-        dependencies: react18Deps,
+        files: join(__dirname, 'custom-server'),
       })
       await next.stop()
 
@@ -126,9 +139,6 @@ if (isNextProd) {
           }`,
         },
         nextConfig: {
-          experimental: {
-            runtime: 'nodejs',
-          },
           webpack(config, { nextRuntime }) {
             const path = require('path')
             const fs = require('fs')
@@ -147,7 +157,6 @@ if (isNextProd) {
             return config
           },
         },
-        dependencies: react18Deps,
       })
     })
     afterAll(() => {

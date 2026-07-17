@@ -9,7 +9,7 @@
     "directory": "packages/next-bundle-analyzer"
   },
   "dependencies": {
-    "webpack-bundle-analyzer": "4.10.1"
+    "webpack-bundle-analyzer": "5.2.0"
   },
   "scripts": {
     "pack-for-isolated-tests": "pnpm pack --out ./packed.tgz"
